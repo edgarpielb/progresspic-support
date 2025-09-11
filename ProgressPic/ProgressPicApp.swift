@@ -1,17 +1,14 @@
-//
-//  ProgressPicApp.swift
-//  ProgressPic
-//
-//  Created by Edgar Pielbusch on 2025-09-11.
-//
-
 import SwiftUI
+import SwiftData
 
 @main
 struct ProgressPicApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .modelContainer(
+                    for: [Journey.self, ProgressPhoto.self, MeasurementEntry.self]
+                )
         }
     }
 }

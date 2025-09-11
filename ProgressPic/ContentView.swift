@@ -1,24 +1,35 @@
-//
-//  ContentView.swift
-//  ProgressPic
-//
-//  Created by Edgar Pielbusch on 2025-09-11.
-//
-
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var themeManager = ThemeManager()
+    @State private var selectedTab = 0
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        ZStack {
+            // Full screen dark background
+            Color(red: 30/255, green: 32/255, blue: 35/255)
+                .ignoresSafeArea()
+
+            TabView(selection: $selectedTab) {
+                JourneysView()
+                    .tag(0)
+                ActivityView()
+                    .tag(1)
+                CameraHostView()
+                    .tag(2)
+                CompareView()
+                    .tag(3)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            VStack {
+                Spacer()
+                CustomTabBar(selectedTab: $selectedTab)
+                    .padding(.bottom, 8)
+            }
         }
-        .padding()
+        .environmentObject(themeManager)
     }
 }
 
-#Preview {
-    ContentView()
-}
+#Preview { ContentView() }
