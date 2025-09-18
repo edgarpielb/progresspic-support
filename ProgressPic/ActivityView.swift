@@ -5,78 +5,103 @@ import Charts
 struct ActivityView: View {
     @Query(sort: \Journey.createdAt, order: .reverse) private var journeys: [Journey]
     @State private var selectedJourney: Journey?
-    @State private var showAvg = true
     @State private var showAddSheet = false
-    @EnvironmentObject private var themeManager: ThemeManager
 
     var body: some View {
         ZStack {
-            // Force dark background
-            Color(red: 30/255, green: 32/255, blue: 35/255)
-                .ignoresSafeArea()
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    // Journey picker
+            Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+
+            if selectedJourney == nil {
+                // Empty state without ScrollView
+                VStack(spacing: 20) {
+                    // Journey picker at top
                     Menu {
                         ForEach(journeys) { j in Button(j.name) { selectedJourney = j } }
                     } label: {
-                        Label(selectedJourney?.name ?? "Select Journey", systemImage: "rectangle.stack")
-                            .foregroundColor(.white)
-                            .padding(10).background(.ultraThinMaterial, in: Capsule())
+                        HStack(spacing: 8) {
+                            Image(systemName: "rectangle.stack")
+                            Text("Select Journey")
+                        }
+                        .foregroundColor(.white)
+                        .glassCapsule()
+                        .contentShape(Rectangle())
                     }
                     .padding(.top, 12)
-
-                if let j = selectedJourney {
-                    // WEEK RING
-                    WeekRingView(journey: j)
-
-                    // STREAKS
-                    StreakCards(journey: j)
-
-                    // YEAR HEATMAP
-                    YearHeatmapView(journey: j)
-
-                    // MEASUREMENTS + CHART
-                    MeasurementsSection(journey: j, showAvg: $showAvg)
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                showAddSheet = true
-                            } label: {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(.white)
-                                    .padding(10)
-                            }
-                        }
-                } else {
+                    
+                    Spacer()
+                    
+                    // Centered message
                     Text("Select a journey to see your activity")
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .font(.body)
+                    
+                    Spacer()
                 }
+                .padding(.horizontal, 16)
+            } else {
+                // Content state with ScrollView
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        // Journey picker as a glass capsule (larger tap area)
+                        Menu {
+                            ForEach(journeys) { j in Button(j.name) { selectedJourney = j } }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "rectangle.stack")
+                                Text(selectedJourney?.name ?? "Select Journey")
+                            }
+                            .foregroundColor(.white)
+                            .glassCapsule()
+                            .contentShape(Rectangle())
+                        }
+                        .padding(.top, 12)
 
-                Spacer(minLength: 160)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 120) // Space for custom tab bar
+                        if let j = selectedJourney {
+                            WeekRingView(journey: j)
+                                .padding(12)
+                                .glassCard()
+
+                            StreakCards(journey: j)
+                                .padding(12)
+                                .glassCard()
+
+                            YearHeatmapView(journey: j)
+                                .padding(12)
+                                .glassCard()
+
+                            MeasurementsSection(journey: j) {
+                                showAddSheet = true
+                            }
+                            .padding(12)
+                            .glassCard()
+                        }
+
+                        Spacer(minLength: 160)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 120)
+                }
             }
         }
         .navigationTitle("Activity")
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .sheet(isPresented: $showAddSheet) {
+        .fullScreenCover(isPresented: $showAddSheet) {
             if let j = selectedJourney {
                 AddMeasurementSheet(journey: j)
-                    .presentationDetents([.medium, .large])
             }
         }
         .onAppear {
-            if selectedJourney == nil { selectedJourney = journeys.first }
+            if selectedJourney == nil, let firstJourney = journeys.first {
+                selectedJourney = firstJourney
+            }
         }
     }
 }
 
-// -------- Streak cards (unchanged) --------
+// Unchanged logic — only small style tweaks inside components if needed.
 struct StreakCards: View {
     let journey: Journey
     @Query private var photos: [ProgressPhoto]
@@ -110,24 +135,24 @@ struct StreakCards: View {
     func Card(_ title: String, value: String) -> some View {
         VStack(alignment: .leading) {
             Text(title).font(.callout).foregroundStyle(.secondary)
-            Text(value).font(.title.bold())
+            Text(value).font(.title.bold()).foregroundColor(.white)
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color.black.opacity(0.15)))
+        .glassTile()
     }
 }
 
-// -------- Measurements + Chart (minor tweak: header spacing) --------
 struct MeasurementsSection: View {
     let journey: Journey
+    var onAddTap: () -> Void
     @Query private var entries: [MeasurementEntry]
     @State private var type: MeasurementType = .bicepsRight
-    @Binding var showAvg: Bool
+    @State private var showAvg = true
 
-    init(journey: Journey, showAvg: Binding<Bool>) {
+    init(journey: Journey, onAddTap: @escaping () -> Void) {
         self.journey = journey
-        _showAvg = showAvg
+        self.onAddTap = onAddTap
         let journeyId = journey.id
         _entries = Query(filter: #Predicate<MeasurementEntry> { $0.journeyId == journeyId },
                          sort: \MeasurementEntry.date, order: .forward)
@@ -136,17 +161,41 @@ struct MeasurementsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Measurements").font(.title3.bold())
+                Text("Measurements")
+                    .font(.title3.bold()).foregroundColor(.white)
                 Spacer()
-                HStack(spacing: 8) {
-                    Text("7-day avg").font(.caption).foregroundStyle(.secondary)
-                    Toggle("", isOn: $showAvg).labelsHidden()
+                Button(action: onAddTap) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
                 }
             }
 
-            Picker("", selection: $type) {
-                ForEach(MeasurementType.allCases) { t in Text(t.title).tag(t) }
-            }.pickerStyle(.segmented)
+            // Replace the segmented Picker with chips:
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(MeasurementType.allCases) { t in
+                        Button {
+                            type = t
+                        } label: {
+                            Text(t.title)
+                                .font(.caption.bold())
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(t == type ? Color.white.opacity(0.10) : Color.white.opacity(0.06))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(t == type ? Color.white.opacity(0.35) : Color.white.opacity(0.15), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
 
             Chart {
                 ForEach(series()) { point in
@@ -162,7 +211,7 @@ struct MeasurementsSection: View {
                 }
             }
             .frame(height: 240)
-            .background(RoundedRectangle(cornerRadius: 18).fill(Color.black.opacity(0.15)))
+            .glassTile(corner: 18)
         }
     }
 

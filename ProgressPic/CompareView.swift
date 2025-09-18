@@ -8,7 +8,6 @@ struct CompareView: View {
     @State private var mode: Mode = .parallel
     @State private var left: ProgressPhoto?
     @State private var right: ProgressPhoto?
-    @EnvironmentObject private var themeManager: ThemeManager
 
     enum Mode: String, CaseIterable { case parallel = "Parallel", slider = "Slider" }
 
@@ -18,41 +17,52 @@ struct CompareView: View {
             Color(red: 30/255, green: 32/255, blue: 35/255)
                 .ignoresSafeArea()
             
-            VStack {
+            VStack(spacing: 16) {
                 Menu {
                     ForEach(journeys) { j in Button(j.name) { selectedJourney = j } }
                 } label: {
-                    Label(selectedJourney?.name ?? "Select Journey", systemImage: "rectangle.stack")
-                        .foregroundColor(.white)
-                        .padding(10).background(.ultraThinMaterial, in: Capsule())
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.stack")
+                        Text(selectedJourney?.name ?? "Select Journey")
+                    }
+                    .foregroundColor(.white)
+                    .glassCapsule()
+                    .contentShape(Rectangle())
                 }
                 .padding(.top, 12)
-
-            Picker("", selection: $mode) {
-                Text("Parallel").tag(Mode.parallel)
-                Text("Slider").tag(Mode.slider)
-            }
-            .pickerStyle(.segmented)
-            .padding()
-
-            if let j = selectedJourney {
-                ComparePicker(journey: j, left: $left, right: $right)
-                if let l = left, let r = right {
-                    CompareCanvas(left: l, right: r, mode: mode)
-                        .padding()
-                } else {
-                    Text("Pick two photos").foregroundColor(.white).padding()
+                
+                Picker("", selection: $mode) {
+                    Text("Parallel").tag(Mode.parallel)
+                    Text("Slider").tag(Mode.slider)
                 }
-            } else {
-                Text("Select a journey").foregroundColor(.white).padding()
-            }
-            Spacer()
+                .pickerStyle(.segmented)
+                .tint(.white)
+                .padding()
+
+                if let j = selectedJourney {
+                    ComparePicker(journey: j, left: $left, right: $right)
+                    if let l = left, let r = right {
+                        CompareCanvas(left: l, right: r, mode: mode)
+                            .padding()
+                    } else {
+                        Text("Pick two photos").foregroundColor(.white).padding()
+                    }
+                } else {
+                    Text("Select a journey").foregroundColor(.white).padding()
+                }
+                
+                Spacer()
             }
         }
         .navigationTitle("Compare")
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .onAppear {
+            if selectedJourney == nil, let firstJourney = journeys.first {
+                selectedJourney = firstJourney
+            }
+        }
     }
 }
 
@@ -99,9 +109,10 @@ struct Thumb: View {
     @State private var img: UIImage?
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.2))
+            RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06))
             if let ui = img { Image(uiImage: ui).resizable().scaledToFill().clipped() }
         }
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.14)))
         .frame(width: 90, height: 90)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .task { img = await PhotoStore.fetchUIImage(localId: localId, targetSize: CGSize(width: 200, height: 200)) }
@@ -128,18 +139,29 @@ struct CompareCanvas: View {
                     }
                 case .slider:
                     GeometryReader { geo in
-                        let w = geo.size.width
+                        let w = max(1, geo.size.width)                // avoid div by 0
                         let cut = w * sliderX
+
                         Image(uiImage: l).resizable().scaledToFit()
                         Image(uiImage: r).resizable().scaledToFit()
                             .mask(alignment: .leading) {
                                 Rectangle().frame(width: cut).offset(x: -w/2)
                             }
+
                         Rectangle().fill(.white).frame(width: 2).position(x: cut, y: geo.size.height/2)
+                        
+                        // Invisible overlay for gesture handling
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())                         // make entire area draggable
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { v in
+                                        let x = min(max(v.location.x, 0), geo.size.width)
+                                        sliderX = x / max(1, geo.size.width)
+                                    }
+                            )
                     }
-                    .gesture(DragGesture().onChanged { v in
-                        sliderX = min(0.98, max(0.02, v.location.x / max(1, v.startLocation.x + v.translation.width)))
-                    })
                     .frame(height: 420)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 }

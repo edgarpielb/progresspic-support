@@ -3,6 +3,7 @@ import SwiftUI
 struct AdjustView: View {
     let captured: UIImage
     let ghost: UIImage?
+    let saveToCameraRoll: Bool
     var onSave: (_ savedLocalId: String, _ transform: AlignTransform) -> Void
 
     @State private var scale: CGFloat = 1
@@ -14,10 +15,16 @@ struct AdjustView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.opacity(0.85).ignoresSafeArea()
+                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+
                 if let g = ghost {
-                    Image(uiImage: g).resizable().scaledToFit().opacity(opacity).blendMode(.plusLighter)
+                    Image(uiImage: g)
+                        .resizable()
+                        .scaledToFit()
+                        .opacity(opacity)
+                        .blendMode(.plusLighter)
                 }
+
                 Image(uiImage: captured)
                     .resizable()
                     .scaledToFit()
@@ -30,8 +37,18 @@ struct AdjustView: View {
                     .animation(.snappy, value: rotation)
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } } }
+                ToolbarItem(placement: .cancellationAction) { 
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.white)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) { 
+                    Button(action: { Task { await save() } }) {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.blue)
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 14) {
@@ -42,11 +59,9 @@ struct AdjustView: View {
                         }.padding(.horizontal)
                     }
                     HStack {
-                        Button("Revert") {
-                            scale = 1; offset = .zero; rotation = .zero
-                        }
+                        Button("Revert") { scale = 1; offset = .zero; rotation = .zero }
                         Spacer()
-                        Button("Undo") { /* left empty for MVP */ }
+                        Button("Undo") { /* reserved */ }
                     }
                     .font(.callout)
                     .padding(.horizontal)
@@ -67,8 +82,37 @@ struct AdjustView: View {
         )
     }
 
+    // Render to strict 4:5 based on current transform
+    func makeCroppedImage() -> UIImage {
+        let outW: CGFloat = 2000   // 4:5 canvas (high-res)
+        let outH: CGFloat = 2500
+        let canvas = CGSize(width: outW, height: outH)
+
+        let baseScale = min(outW / captured.size.width, outH / captured.size.height)
+        let finalScale = baseScale * max(scale, 0.001)
+
+        let renderer = UIGraphicsImageRenderer(size: canvas)
+        return renderer.image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvas))
+
+            ctx.cgContext.translateBy(x: outW/2 + offset.width, y: outH/2 + offset.height)
+            ctx.cgContext.rotate(by: rotation.radians)
+            ctx.cgContext.scaleBy(x: finalScale, y: finalScale)
+
+            let drawRect = CGRect(
+                x: -captured.size.width/2,
+                y: -captured.size.height/2,
+                width: captured.size.width,
+                height: captured.size.height
+            )
+            captured.draw(in: drawRect)
+        }
+    }
+
     func save() async {
-        guard let localId = try? await PhotoStore.saveToLibrary(captured) else { return }
+        let cropped = makeCroppedImage()
+        guard let localId = try? await PhotoStore.saveToAppDirectoryAndLibrary(cropped, saveToCameraRoll: saveToCameraRoll) else { return }
         let transform = AlignTransform(scale: scale, offsetX: offset.width, offsetY: offset.height, rotation: rotation.radians)
         onSave(localId, transform)
         dismiss()

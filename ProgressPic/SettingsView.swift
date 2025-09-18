@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject private var themeManager: ThemeManager
-    
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -11,7 +9,7 @@ struct SettingsView: View {
                     Text("Settings")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
-                        .foregroundColor(ThemeColors.primaryText(for: themeManager.effectiveColorScheme))
+                        .foregroundColor(ThemeColors.primaryText())
                     Spacer()
                 }
                 .padding(.horizontal, 20)
@@ -19,43 +17,25 @@ struct SettingsView: View {
                 
                 // Settings content
                 VStack(spacing: 16) {
-                    // Theme Toggle
-                    HStack {
-                        Text("Dark Mode")
-                            .foregroundColor(ThemeColors.primaryText(for: themeManager.effectiveColorScheme))
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { themeManager.effectiveColorScheme == .dark },
-                            set: { newValue in
-                                themeManager.currentTheme = newValue ? .dark : .light
-                            }
-                        ))
-                    }
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(ThemeColors.cardBackground(for: themeManager.effectiveColorScheme))
-                    )
-                    
                     // App Info
                     VStack(alignment: .leading, spacing: 8) {
                         Text("About")
                             .font(.headline)
-                            .foregroundColor(ThemeColors.primaryText(for: themeManager.effectiveColorScheme))
+                            .foregroundColor(ThemeColors.primaryText())
                         
                         Text("ProgressPic")
                             .font(.title2.bold())
-                            .foregroundColor(ThemeColors.primaryText(for: themeManager.effectiveColorScheme))
+                            .foregroundColor(ThemeColors.primaryText())
                         
                         Text("Version 1.0")
                             .font(.body)
-                            .foregroundColor(ThemeColors.secondaryText(for: themeManager.effectiveColorScheme))
+                            .foregroundColor(ThemeColors.secondaryText())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(ThemeColors.cardBackground(for: themeManager.effectiveColorScheme))
+                            .fill(ThemeColors.cardBackground())
                     )
                 }
                 .padding(.horizontal, 20)
@@ -63,12 +43,11 @@ struct SettingsView: View {
             .padding(.top, 60)
             .padding(.bottom, 120)
         }
-        .background(ThemeColors.backgroundColor(for: themeManager.effectiveColorScheme))
+        .background(ThemeColors.backgroundColor())
         .ignoresSafeArea(.container, edges: .top)
     }
 }
 
 #Preview {
     SettingsView()
-        .environmentObject(ThemeManager())
 }

@@ -15,12 +15,15 @@ struct AddMeasurementSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ZStack {
+                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                
+                Form {
                 Section("Type") {
                     Picker("Measurement", selection: $type) {
                         ForEach(MeasurementType.allCases) { t in Text(t.title).tag(t) }
                     }
-                    .onChange(of: type) { _ in unit = defaultUnit(for: type) }
+                    .onChange(of: type) { unit = defaultUnit(for: type) }
                 }
 
                 if type == .custom {
@@ -44,12 +47,19 @@ struct AddMeasurementSheet: View {
                 }
 
                 Section("How to measure") { guide(for: type) }
+                }
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Add Measurement")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { 
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.white)
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(action: {
                         guard let value = Double(valueString.replacingOccurrences(of: ",", with: ".")) else { return }
                         let entry = MeasurementEntry(
                             journeyId: journey.id,
@@ -61,7 +71,11 @@ struct AddMeasurementSheet: View {
                         )
                         ctx.insert(entry)
                         dismiss()
+                    }) {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(valueString.isEmpty ? .gray : .blue)
                     }
+                    .disabled(valueString.isEmpty)
                 }
             }
         }

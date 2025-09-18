@@ -1,34 +1,76 @@
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
-    @StateObject private var themeManager = ThemeManager()
     @State private var selectedTab = 0
+    @Environment(\.modelContext) private var modelContext
     
     var body: some View {
-        ZStack {
-            // Full screen dark background
-            Color(red: 30/255, green: 32/255, blue: 35/255)
-                .ignoresSafeArea()
-
-            TabView(selection: $selectedTab) {
-                JourneysView()
-                    .tag(0)
-                ActivityView()
-                    .tag(1)
-                CameraHostView()
-                    .tag(2)
-                CompareView()
-                    .tag(3)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-
-            VStack {
-                Spacer()
-                CustomTabBar(selectedTab: $selectedTab)
-                    .padding(.bottom, 8)
+        TabView(selection: $selectedTab) {
+            JourneysView()
+                .tabItem {
+                    Image(systemName: "rectangle.stack")
+                    Text("Journeys")
+                }
+                .tag(0)
+            
+            CameraHostView()
+                .tabItem {
+                    Image(systemName: "camera.fill")
+                    Text("Camera")
+                }
+                .tag(1)
+            
+            ActivityView()
+                .tabItem {
+                    Image(systemName: "flame")
+                    Text("Activity")
+                }
+                .tag(2)
+        }
+        .background(Color(red: 30/255, green: 32/255, blue: 35/255))
+        .accentColor(.white)
+        .onAppear {
+            // Fix any existing photos that don't have journey relationships set
+            Task {
+                await fixOrphanedPhotos()
             }
         }
-        .environmentObject(themeManager)
+    }
+    
+    // MARK: - Migration Helper
+    @MainActor
+    private func fixOrphanedPhotos() async {
+        do {
+            // Fetch all journeys and photos
+            let journeyDescriptor = FetchDescriptor<Journey>()
+            let photoDescriptor = FetchDescriptor<ProgressPhoto>()
+            
+            let journeys = try modelContext.fetch(journeyDescriptor)
+            let photos = try modelContext.fetch(photoDescriptor)
+            
+            // Create a lookup dictionary for journeys by ID
+            let journeyLookup = Dictionary(uniqueKeysWithValues: journeys.map { ($0.id, $0) })
+            
+            var fixedCount = 0
+            
+            // Fix photos that don't have journey relationship set
+            for photo in photos {
+                if photo.journey == nil, let journey = journeyLookup[photo.journeyId] {
+                    photo.journey = journey
+                    fixedCount += 1
+                }
+            }
+            
+            if fixedCount > 0 {
+                try modelContext.save()
+                print("🔧 Fixed \(fixedCount) orphaned photos")
+            } else {
+                print("✅ No orphaned photos found")
+            }
+        } catch {
+            print("⚠️ Failed to fix orphaned photos: \(error)")
+        }
     }
 }
 
