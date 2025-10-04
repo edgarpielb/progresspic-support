@@ -3,18 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Header
-                HStack {
-                    Text("Settings")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .foregroundColor(ThemeColors.primaryText())
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
-                
+            VStack(spacing: 20) {
                 // Settings content
                 VStack(spacing: 16) {
                     // App Info
@@ -40,11 +29,12 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 20)
             }
-            .padding(.top, 60)
+            .padding(.top, 20)
             .padding(.bottom, 120)
         }
         .background(ThemeColors.backgroundColor())
-        .ignoresSafeArea(.container, edges: .top)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
