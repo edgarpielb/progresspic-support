@@ -275,7 +275,14 @@ final class CameraService: NSObject, ObservableObject {
             self.session.commitConfiguration()
             print("✅ Session configuration complete")
 
-            // Create preview layer on main thread
+            // Start the session immediately after configuration is committed (on same background queue)
+            if !self.session.isRunning {
+                print("🎥 Starting camera session after configuration...")
+                self.session.startRunning()
+                print("📹 Camera session started: \(self.session.isRunning)")
+            }
+
+            // Create preview layer and update UI on main thread
             DispatchQueue.main.async {
                 if self.previewLayer == nil {
                     let layer = AVCaptureVideoPreviewLayer(session: self.session)
@@ -284,15 +291,10 @@ final class CameraService: NSObject, ObservableObject {
                 } else {
                     self.previewLayer?.session = self.session
                 }
-                // Ensure the session actually runs after we configure
-                if !self.session.isRunning {
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        self.session.startRunning()
-                        DispatchQueue.main.async { self.updateCaptureReadiness() }
-                    }
-                } else {
-                    DispatchQueue.main.async { self.updateCaptureReadiness() }
-                }
+                
+                print("📹 Session inputs: \(self.session.inputs.count)")
+                print("📹 Session outputs: \(self.session.outputs.count)")
+                self.updateCaptureReadiness()
             }
         }
     }
@@ -303,8 +305,9 @@ final class CameraService: NSObject, ObservableObject {
             return 
         }
         
-        if !session.isRunning { 
-            DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Only start if not already running and not in configuration
+            if !self.session.isRunning {
                 print("🎥 Starting camera session...")
                 self.session.startRunning()
                 
@@ -314,10 +317,12 @@ final class CameraService: NSObject, ObservableObject {
                     print("📹 Session outputs: \(self.session.outputs.count)")
                     self.updateCaptureReadiness()
                 }
+            } else {
+                print("📹 Camera session already running")
+                DispatchQueue.main.async {
+                    self.updateCaptureReadiness()
+                }
             }
-        } else {
-            print("📹 Camera session already running")
-            Task { @MainActor in self.updateCaptureReadiness() }
         }
     }
     func stop() { 
