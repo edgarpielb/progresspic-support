@@ -1,12 +1,29 @@
 import SwiftUI
+import SwiftData
 
 struct EditReminderView: View {
-    @Binding var reminderTimes: [DateComponents]
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var ctx
+    
+    let journey: Journey
+    var existingReminder: JourneyReminder?
     
     @State private var selectedHour = 10
     @State private var selectedMinute = 0
     @State private var selectedDays: Set<Int> = [1, 2, 3, 4, 5, 6, 7] // All days selected by default
+    @State private var notificationText = "Time for a new photo!"
+    
+    init(journey: Journey, existingReminder: JourneyReminder? = nil) {
+        self.journey = journey
+        self.existingReminder = existingReminder
+        
+        if let reminder = existingReminder {
+            _selectedHour = State(initialValue: reminder.hour)
+            _selectedMinute = State(initialValue: reminder.minute)
+            _selectedDays = State(initialValue: reminder.selectedDays)
+            _notificationText = State(initialValue: reminder.notificationText)
+        }
+    }
     
     private let days = [
         (1, "Monday"),
@@ -27,6 +44,21 @@ struct EditReminderView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Spacer()
                             .frame(height: 20) // Add some top padding
+                        
+                        // Notification Text
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Notification Message")
+                                .font(.body)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                            
+                            TextField("Time for a new photo!", text: $notificationText)
+                                .padding()
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(8)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                        }
                         
                         // Reminder Time Picker
                         VStack(alignment: .leading, spacing: 8) {
@@ -136,7 +168,7 @@ struct EditReminderView: View {
                     }
                 }
             }
-            .navigationTitle("Edit Reminder")
+            .navigationTitle(existingReminder == nil ? "Add Reminder" : "Edit Reminder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -153,6 +185,7 @@ struct EditReminderView: View {
                         Image(systemName: "checkmark")
                             .foregroundColor(.blue)
                     }
+                    .disabled(notificationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedDays.isEmpty)
                 }
             }
         }
@@ -161,14 +194,30 @@ struct EditReminderView: View {
     private func saveReminder() {
         guard !selectedDays.isEmpty else { return }
         
-        var components = DateComponents(hour: selectedHour, minute: selectedMinute)
-        // Encode selected days into the nanosecond field as a bitmask
         let daysBitmask = selectedDays.reduce(0) { result, day in
             result | (1 << (day - 1))
         }
-        components.nanosecond = daysBitmask
         
-        reminderTimes.append(components)
+        if let existing = existingReminder {
+            // Update existing reminder
+            existing.hour = selectedHour
+            existing.minute = selectedMinute
+            existing.daysBitmask = daysBitmask
+            existing.notificationText = notificationText
+        } else {
+            // Create new reminder
+            let newReminder = JourneyReminder(
+                hour: selectedHour,
+                minute: selectedMinute,
+                daysBitmask: daysBitmask,
+                notificationText: notificationText
+            )
+            ctx.insert(newReminder)
+            newReminder.journey = journey
+        }
+        
+        // Reschedule notifications
+        ReminderManager.schedule(for: journey)
     }
     
     private func formatDaysInfo(for components: DateComponents) -> String {

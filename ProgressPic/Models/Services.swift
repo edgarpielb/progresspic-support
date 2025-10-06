@@ -3,9 +3,35 @@ import AVFoundation
 import Photos
 import PhotosUI
 import UserNotifications
+import HealthKit
+import StoreKit
 
 // MARK: - PhotoStore (Local file storage)
 enum PhotoStore {
+    /// Memory cache for loaded images to avoid repeated decoding
+    /// Automatically evicts under memory pressure
+    private static let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        // Limit cache to prevent unbounded memory growth
+        cache.countLimit = 50  // Maximum 50 images in cache
+        cache.totalCostLimit = 100 * 1024 * 1024  // 100 MB total
+        return cache
+    }()
+    
+    /// Generate a cache key from localId and optional target size
+    private static func cacheKey(for localId: String, targetSize: CGSize?) -> String {
+        if let size = targetSize {
+            return "\(localId)_\(Int(size.width))x\(Int(size.height))"
+        }
+        return "\(localId)_full"
+    }
+    
+    /// Clear the image cache (useful for memory warnings or testing)
+    static func clearCache() {
+        imageCache.removeAllObjects()
+        print("🗑️ Cleared image cache")
+    }
+    
     static func requestAuthorization() async -> Bool {
         // Still needed for importing existing photos from photo library
         await withCheckedContinuation { cont in
@@ -57,15 +83,49 @@ enum PhotoStore {
             PHAssetChangeRequest.creationRequestForAsset(from: image)
         }
     }
+    
+    static func deleteFromAppDirectory(localId: String) async throws {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let photosDirectory = documentsPath.appendingPathComponent("Photos")
+        let fileURL = photosDirectory.appendingPathComponent(localId)
+        
+        // Remove from cache
+        imageCache.removeObject(forKey: localId as NSString)
+        
+        // Delete the file
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try FileManager.default.removeItem(at: fileURL)
+            print("🗑️ Deleted photo file: \(localId)")
+        } else {
+            print("⚠️ Photo file not found: \(localId)")
+        }
+    }
 
     static func fetchUIImage(localId: String, targetSize: CGSize? = nil) async -> UIImage? {
+        // Check cache first
+        let key = cacheKey(for: localId, targetSize: targetSize)
+        if let cachedImage = imageCache.object(forKey: key as NSString) {
+            print("✅ Cache hit for: \(localId) (\(targetSize != nil ? "\(Int(targetSize!.width))x\(Int(targetSize!.height))" : "full"))")
+            return cachedImage
+        }
+        
         // First try to load from app directory (new method)
         if let image = loadFromAppDirectory(filename: localId, targetSize: targetSize) {
+            // Cache the loaded image
+            imageCache.setObject(image, forKey: key as NSString)
+            print("💾 Cached image: \(localId) (\(targetSize != nil ? "\(Int(targetSize!.width))x\(Int(targetSize!.height))" : "full"))")
             return image
         }
         
         // Fallback: try to load from photo library (for existing photos)
-        return await loadFromPhotoLibrary(localId: localId, targetSize: targetSize)
+        if let image = await loadFromPhotoLibrary(localId: localId, targetSize: targetSize) {
+            // Cache the loaded image
+            imageCache.setObject(image, forKey: key as NSString)
+            print("💾 Cached image from library: \(localId)")
+            return image
+        }
+        
+        return nil
     }
     
     static func loadFromAppDirectory(filename: String, targetSize: CGSize? = nil) -> UIImage? {
@@ -73,18 +133,44 @@ enum PhotoStore {
         let photosDirectory = documentsPath.appendingPathComponent("Photos")
         let fileURL = photosDirectory.appendingPathComponent(filename)
         
-        guard let image = UIImage(contentsOfFile: fileURL.path) else {
+        // If no target size, load normally (for editing, etc.)
+        guard let targetSize = targetSize else {
+            return UIImage(contentsOfFile: fileURL.path)
+        }
+        
+        // Use CGImageSource for efficient downsampling
+        // This decodes only the pixels we need, avoiding memory spikes
+        return downsampleImage(at: fileURL, to: targetSize)
+    }
+    
+    /// Efficiently downsample an image using CGImageSource
+    /// This avoids loading the full image into memory, preventing memory spikes
+    private static func downsampleImage(at imageURL: URL, to targetSize: CGSize) -> UIImage? {
+        let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let imageSource = CGImageSourceCreateWithURL(imageURL as CFURL, imageSourceOptions) else {
+            print("⚠️ Failed to create image source for: \(imageURL.lastPathComponent)")
             return nil
         }
         
-        // If no target size specified, return original image
-        guard let targetSize = targetSize else { return image }
+        // Calculate the maximum dimension
+        let maxDimensionInPixels = max(targetSize.width, targetSize.height)
         
-        // Resize image if target size is specified
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        // Create thumbnail options
+        let downsampleOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimensionInPixels
+        ] as CFDictionary
+        
+        // Generate the thumbnail
+        guard let downsampledImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions) else {
+            print("⚠️ Failed to create thumbnail for: \(imageURL.lastPathComponent)")
+            // Fallback to standard loading
+            return UIImage(contentsOfFile: imageURL.path)
         }
+        
+        return UIImage(cgImage: downsampledImage)
     }
     
     static func loadFromPhotoLibrary(localId: String, targetSize: CGSize? = nil) async -> UIImage? {
@@ -180,21 +266,28 @@ enum PhotoStore {
 }
 
 // MARK: - CameraService (AVFoundation)
-final class CameraService: NSObject, ObservableObject {
+final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     @Published var previewLayer: AVCaptureVideoPreviewLayer?
     @Published var latestPhoto: UIImage?
     @Published var isFront = true
     @Published var isAuthorized = false
     @Published var canCapture = false
+    @Published var flashMode: AVCaptureDevice.FlashMode = .off
+    @Published var currentZoom: CGFloat = 1.0
+    @Published var maxZoom: CGFloat = 5.0
 
     private let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
 
     override init() {
         super.init()
-        Task {
-            await requestCameraPermission()
-        }
+        // Don't auto-start camera - wait for view to appear
+        // This prevents camera from starting when app launches on non-camera tab
+    }
+    
+    @MainActor
+    func requestPermissionIfNeeded() async {
+        await requestCameraPermission()
     }
     
     @MainActor
@@ -206,15 +299,13 @@ final class CameraService: NSObject, ObservableObject {
         case .authorized:
             print("✅ Camera already authorized")
             isAuthorized = true
-            configureSession(front: true)
+            // Don't configure here - let start() handle it
         case .notDetermined:
             print("❓ Requesting camera permission...")
             let granted = await AVCaptureDevice.requestAccess(for: .video)
             print("📹 Camera permission granted: \(granted)")
             isAuthorized = granted
-            if granted {
-                configureSession(front: true)
-            }
+            // Don't configure here - let start() handle it
         case .denied:
             print("❌ Camera permission denied")
             isAuthorized = false
@@ -232,6 +323,100 @@ final class CameraService: NSObject, ObservableObject {
         let active = session.isRunning &&
                      output.connections.contains { $0.isEnabled && $0.isActive }
         canCapture = active
+    }
+    
+    @MainActor
+    func updateOrientation() {
+        guard let connection = previewLayer?.connection else {
+            return
+        }
+        
+        // Get the current interface orientation using modern API
+        let interfaceOrientation: UIInterfaceOrientation
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            interfaceOrientation = windowScene.interfaceOrientation
+        } else {
+            interfaceOrientation = .portrait
+        }
+        
+        // Use iOS 17+ rotation angle API when available
+        if #available(iOS 17.0, *) {
+            // Convert interface orientation to rotation angle in degrees
+            // Front and back cameras need different rotation angles
+            let rotationAngle: CGFloat
+            
+            if isFront {
+                // Front camera uses standard rotation
+                switch interfaceOrientation {
+                case .portrait:
+                    rotationAngle = 0
+                case .portraitUpsideDown:
+                    rotationAngle = 180
+                case .landscapeLeft:
+                    rotationAngle = 270
+                case .landscapeRight:
+                    rotationAngle = 90
+                case .unknown:
+                    rotationAngle = 0
+                @unknown default:
+                    rotationAngle = 0
+                }
+            } else {
+                // Back camera sensor is landscape by default, needs 90° adjustment
+                switch interfaceOrientation {
+                case .portrait:
+                    rotationAngle = 90
+                case .portraitUpsideDown:
+                    rotationAngle = 270
+                case .landscapeLeft:
+                    rotationAngle = 180
+                case .landscapeRight:
+                    rotationAngle = 0
+                case .unknown:
+                    rotationAngle = 90
+                @unknown default:
+                    rotationAngle = 90
+                }
+            }
+            
+            if connection.isVideoRotationAngleSupported(rotationAngle) {
+                connection.videoRotationAngle = rotationAngle
+                print("🔄 Video rotation angle set to: \(rotationAngle)° for \(isFront ? "front" : "back") camera in \(interfaceOrientation)")
+            }
+        } else {
+            // Fallback for iOS 16 and earlier
+            #if compiler(>=5.9)
+            // Suppress deprecation warning for iOS 16 compatibility
+            if connection.isVideoOrientationSupported {
+                let videoOrientation: AVCaptureVideoOrientation
+                switch interfaceOrientation {
+                case .portrait:
+                    videoOrientation = .portrait
+                case .portraitUpsideDown:
+                    videoOrientation = .portraitUpsideDown
+                case .landscapeLeft:
+                    videoOrientation = .landscapeLeft
+                case .landscapeRight:
+                    videoOrientation = .landscapeRight
+                case .unknown:
+                    videoOrientation = .portrait
+                @unknown default:
+                    videoOrientation = .portrait
+                }
+                connection.videoOrientation = videoOrientation
+                print("🔄 Video orientation updated to: \(videoOrientation.rawValue)")
+            }
+            #endif
+        }
+        
+        // Mirror preview for front camera (like a mirror)
+        // But capture will not be mirrored (normal photo)
+        if connection.isVideoMirroringSupported {
+            // IMPORTANT: Must disable automatic adjustment before manual control
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = isFront
+            print("🔄 Video mirroring set to: \(isFront ? "ON (front camera)" : "OFF (back camera)")")
+        }
     }
 
     func configureSession(front: Bool) {
@@ -275,18 +460,14 @@ final class CameraService: NSObject, ObservableObject {
             self.session.commitConfiguration()
             print("✅ Session configuration complete")
 
-            // Start the session immediately after configuration is committed (on same background queue)
-            if !self.session.isRunning {
-                print("🎥 Starting camera session after configuration...")
-                self.session.startRunning()
-                print("📹 Camera session started: \(self.session.isRunning)")
-            }
+            // DON'T start here - let start() method handle it
+            // This prevents race conditions and multiple startRunning calls
 
             // Create preview layer and update UI on main thread
             DispatchQueue.main.async {
                 if self.previewLayer == nil {
                     let layer = AVCaptureVideoPreviewLayer(session: self.session)
-                    layer.videoGravity = .resizeAspectFill
+                    layer.videoGravity = .resizeAspectFill // Fill frame completely without gaps
                     self.previewLayer = layer
                 } else {
                     self.previewLayer?.session = self.session
@@ -294,34 +475,51 @@ final class CameraService: NSObject, ObservableObject {
                 
                 print("📹 Session inputs: \(self.session.inputs.count)")
                 print("📹 Session outputs: \(self.session.outputs.count)")
-                self.updateCaptureReadiness()
+                
+                // Wait a moment for the connection to be ready, then set orientation
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.updateOrientation()
+                }
+                
+                // Now start the session
+                self.startSessionAfterConfiguration()
+            }
+        }
+    }
+    
+    private func startSessionAfterConfiguration() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if !self.session.isRunning {
+                print("🎥 Starting camera session after configuration...")
+                self.session.startRunning()
+                DispatchQueue.main.async {
+                    print("📹 Camera session started: \(self.session.isRunning)")
+                    self.updateCaptureReadiness()
+                }
             }
         }
     }
 
     func start() { 
         guard isAuthorized else { 
-            print("❌ Camera not authorized")
+            print("❌ Camera not authorized - cannot start")
             return 
         }
         
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Only start if not already running and not in configuration
-            if !self.session.isRunning {
-                print("🎥 Starting camera session...")
-                self.session.startRunning()
-                
-                DispatchQueue.main.async {
-                    print("📹 Camera session running: \(self.session.isRunning)")
-                    print("📹 Session inputs: \(self.session.inputs.count)")
-                    print("📹 Session outputs: \(self.session.outputs.count)")
-                    self.updateCaptureReadiness()
-                }
-            } else {
-                print("📹 Camera session already running")
-                DispatchQueue.main.async {
-                    self.updateCaptureReadiness()
-                }
+        print("🎥 Start called - configuring and starting session...")
+        
+        // Configure session first if not configured (no inputs)
+        if session.inputs.isEmpty {
+            print("📹 No inputs - configuring session first")
+            configureSession(front: isFront)
+            // configureSession will start the session automatically
+        } else if !session.isRunning {
+            // Session configured but not running - just start it
+            startSessionAfterConfiguration()
+        } else {
+            print("📹 Camera session already running")
+            DispatchQueue.main.async {
+                self.updateCaptureReadiness()
             }
         }
     }
@@ -333,9 +531,122 @@ final class CameraService: NSObject, ObservableObject {
         }
         Task { @MainActor in canCapture = false }
     }
+    
+    @MainActor
+    func cleanup() {
+        print("🧹 Cleaning up camera resources")
+        // Remove preview layer from superlayer
+        previewLayer?.removeFromSuperlayer()
+        previewLayer = nil
+        canCapture = false
+        
+        // Stop session if running
+        DispatchQueue.global(qos: .userInitiated).async {
+            if self.session.isRunning {
+                self.session.stopRunning()
+                print("🛑 Camera session stopped and cleaned up")
+            }
+        }
+    }
+    
     func flip() {
+        print("🔄 Flipping camera (front: \(isFront) -> \(!isFront))")
         isFront.toggle()
-        configureSession(front: isFront)
+        
+        // Stop session before reconfiguring to prevent race conditions
+        DispatchQueue.global(qos: .userInitiated).async {
+            if self.session.isRunning {
+                print("⏸️ Stopping session before flip")
+                self.session.stopRunning()
+            }
+            
+            // Wait a moment for the session to fully stop
+            Thread.sleep(forTimeInterval: 0.1)
+            
+            // Now reconfigure with the new camera
+            self.configureSession(front: self.isFront)
+            
+            // Force preview layer update on main thread
+            DispatchQueue.main.async {
+                // Trigger a rebinding by temporarily setting to nil, then back
+                let currentSession = self.session
+                self.previewLayer?.session = nil
+                self.previewLayer?.session = currentSession
+                print("🔄 Preview layer rebound to session")
+            }
+        }
+    }
+    
+    func cycleFlashMode() {
+        switch flashMode {
+        case .off:
+            flashMode = .on
+        case .on:
+            flashMode = .auto
+        case .auto:
+            flashMode = .off
+        @unknown default:
+            flashMode = .off
+        }
+        print("💡 Flash mode: \(flashMode.rawValue)")
+    }
+    
+    func zoomIn() {
+        guard let device = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first else { return }
+        
+        do {
+            try device.lockForConfiguration()
+            let deviceMaxZoom = min(device.activeFormat.videoMaxZoomFactor, 5.0) // Cap at 5x
+            let newZoom = min(device.videoZoomFactor * 1.5, deviceMaxZoom)
+            device.videoZoomFactor = newZoom
+            device.unlockForConfiguration()
+            
+            DispatchQueue.main.async {
+                self.currentZoom = newZoom
+                self.maxZoom = deviceMaxZoom
+            }
+            print("🔍 Zoom in: \(newZoom)x")
+        } catch {
+            print("❌ Zoom error: \(error)")
+        }
+    }
+    
+    func zoomOut() {
+        guard let device = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first else { return }
+        
+        do {
+            try device.lockForConfiguration()
+            let newZoom = max(device.videoZoomFactor / 1.5, 1.0)
+            device.videoZoomFactor = newZoom
+            device.unlockForConfiguration()
+            
+            DispatchQueue.main.async {
+                self.currentZoom = newZoom
+            }
+            print("🔍 Zoom out: \(newZoom)x")
+        } catch {
+            print("❌ Zoom error: \(error)")
+        }
+    }
+    
+    func setZoom(_ level: CGFloat) {
+        guard let device = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first else { return }
+        
+        do {
+            try device.lockForConfiguration()
+            let deviceMaxZoom = min(device.activeFormat.videoMaxZoomFactor, 5.0)
+            let newZoom = min(max(level, 1.0), deviceMaxZoom)
+            device.videoZoomFactor = newZoom
+            device.unlockForConfiguration()
+            
+            DispatchQueue.main.async {
+                self.currentZoom = newZoom
+                self.maxZoom = deviceMaxZoom
+            }
+            print("🔍 Zoom set to: \(newZoom)x")
+        } catch {
+            print("❌ Zoom error: \(error)")
+        }
     }
 
     func capturePhoto() {
@@ -343,15 +654,79 @@ final class CameraService: NSObject, ObservableObject {
             print("🚫 Not ready to capture")
             return
         }
+        
         let settings = AVCapturePhotoSettings()
+        
+        // Configure flash if supported by the device
+        if output.supportedFlashModes.contains(flashMode) {
+            settings.flashMode = flashMode
+            print("💡 Flash mode set to: \(flashMode == .on ? "ON" : flashMode == .off ? "OFF" : "AUTO")")
+        } else {
+            print("⚠️ Flash mode \(flashMode.rawValue) not supported on this device")
+        }
+        
         output.capturePhoto(with: settings, delegate: self)
     }
 }
 
 extension CameraService: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil, let data = photo.fileDataRepresentation(), let ui = UIImage(data: data) else { return }
+        guard error == nil, let data = photo.fileDataRepresentation(), var ui = UIImage(data: data) else { return }
+        
+        // For front camera, flip the image horizontally to match what user sees in preview
+        if isFront, let cgImage = ui.cgImage {
+            ui = UIImage(cgImage: cgImage, scale: ui.scale, orientation: .upMirrored)
+            print("🔄 Front camera photo mirrored to match preview")
+        }
+        
         latestPhoto = ui
+    }
+}
+
+// MARK: - Review Request Manager
+enum ReviewRequestManager {
+    private static let lastReviewRequestStreakKey = "LastReviewRequestStreak"
+    private static let hasRequestedFinalReviewKey = "HasRequestedFinalReview"
+    
+    static func checkAndRequestReview(currentStreak: Int) {
+        // Don't request if we've already done the final request
+        if UserDefaults.standard.bool(forKey: hasRequestedFinalReviewKey) {
+            return
+        }
+        
+        let lastRequestedStreak = UserDefaults.standard.integer(forKey: lastReviewRequestStreakKey)
+        
+        // Determine if we should request a review
+        var shouldRequest = false
+        var isFinalRequest = false
+        
+        if currentStreak >= 14 && lastRequestedStreak < 14 {
+            shouldRequest = true
+            isFinalRequest = true
+        } else if currentStreak >= 7 && lastRequestedStreak < 7 {
+            shouldRequest = true
+        } else if currentStreak >= 3 && lastRequestedStreak < 3 {
+            shouldRequest = true
+        }
+        
+        if shouldRequest {
+            // Import StoreKit at the top of the file
+            if #available(iOS 14.0, *) {
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                    SKStoreReviewController.requestReview(in: windowScene)
+                }
+            } else {
+                SKStoreReviewController.requestReview()
+            }
+            
+            // Update last requested streak
+            UserDefaults.standard.set(currentStreak, forKey: lastReviewRequestStreakKey)
+            
+            // Mark if this was the final request
+            if isFinalRequest {
+                UserDefaults.standard.set(true, forKey: hasRequestedFinalReviewKey)
+            }
+        }
     }
 }
 
@@ -366,19 +741,316 @@ enum ReminderManager {
     }
 
     static func schedule(for journey: Journey) {
-        // cancel old
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [journey.id.uuidString])
-        // schedule a daily notification for each time
-        for (idx, comps) in journey.reminderTimes.enumerated() {
-            var dc = DateComponents()
-            dc.hour = comps.hour
-            dc.minute = comps.minute
-            let content = UNMutableNotificationContent()
-            content.title = "Time for a new photo"
-            content.body = "Add today’s photo to \(journey.name)."
-            let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-            let id = "\(journey.id.uuidString)-\(idx)"
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        // Cancel all old notifications for this journey
+        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+            let journeyIds = requests
+                .filter { $0.identifier.hasPrefix(journey.id.uuidString) }
+                .map { $0.identifier }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: journeyIds)
+        }
+        
+        // Schedule notifications for each reminder
+        guard let reminders = journey.reminders else { return }
+        
+        for reminder in reminders {
+            let selectedDays = reminder.selectedDays
+            
+            // Schedule a separate notification for each selected day
+            for day in selectedDays {
+                var dc = DateComponents()
+                dc.hour = reminder.hour
+                dc.minute = reminder.minute
+                dc.weekday = day // 1 = Sunday, 2 = Monday, etc. in Calendar, but we use 1 = Monday
+                
+                // Adjust weekday: our system uses 1=Mon...7=Sun, iOS uses 1=Sun...7=Sat
+                let adjustedWeekday = day == 7 ? 1 : day + 1
+                dc.weekday = adjustedWeekday
+                
+                let content = UNMutableNotificationContent()
+                content.title = reminder.notificationText
+                content.body = "Add today's photo to \(journey.name)."
+                content.sound = .default
+                
+                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
+                let id = "\(journey.id.uuidString)-\(reminder.id.uuidString)-\(day)"
+                
+                UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+            }
         }
     }
+}
+
+// MARK: - HealthKit Service
+struct BodyCompositionData {
+    var weight: Double?
+    var bodyFatPercentage: Double?
+    var leanBodyMass: Double?
+    var bmi: Double?
+    var weightDate: Date?
+    var bodyFatDate: Date?
+    var leanMassDate: Date?
+    var bmiDate: Date?
+}
+
+struct HealthDataPoint: Identifiable {
+    let id = UUID()
+    let date: Date
+    let value: Double
+}
+
+@MainActor
+class HealthKitService: ObservableObject {
+    static let shared = HealthKitService()
+    private let healthStore = HKHealthStore()
+    
+    @Published var isAuthorized = false
+    @Published var bodyComposition = BodyCompositionData()
+    
+    private init() {}
+    
+    func requestAuthorization() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            print("❌ HealthKit is not available on this device")
+            return false
+        }
+        
+        let typesToRead: Set<HKObjectType> = [
+            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
+            HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
+            HKObjectType.quantityType(forIdentifier: .leanBodyMass)!,
+            HKObjectType.quantityType(forIdentifier: .bodyMassIndex)!
+        ]
+        
+        do {
+            try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
+            isAuthorized = true
+            print("✅ HealthKit authorization granted")
+            return true
+        } catch {
+            print("❌ HealthKit authorization failed: \(error)")
+            isAuthorized = false
+            return false
+        }
+    }
+    
+    func fetchBodyComposition() async {
+        guard isAuthorized else {
+            print("⚠️ HealthKit not authorized")
+            return
+        }
+        
+        async let weight = fetchMostRecent(.bodyMass)
+        async let bodyFat = fetchMostRecent(.bodyFatPercentage)
+        async let leanMass = fetchMostRecent(.leanBodyMass)
+        async let bmi = fetchMostRecent(.bodyMassIndex)
+        
+        let results = await (weight, bodyFat, leanMass, bmi)
+        
+        bodyComposition = BodyCompositionData(
+            weight: results.0?.value,
+            bodyFatPercentage: results.0?.value != nil ? (results.1?.value ?? 0) * 100 : nil, // Convert to percentage
+            leanBodyMass: results.2?.value,
+            bmi: results.3?.value,
+            weightDate: results.0?.date,
+            bodyFatDate: results.1?.date,
+            leanMassDate: results.2?.date,
+            bmiDate: results.3?.date
+        )
+        
+        print("📊 Body composition fetched:")
+        print("  Weight: \(bodyComposition.weight ?? 0) kg")
+        print("  Body Fat: \(bodyComposition.bodyFatPercentage ?? 0)%")
+        print("  Lean Mass: \(bodyComposition.leanBodyMass ?? 0) kg")
+        print("  BMI: \(bodyComposition.bmi ?? 0)")
+    }
+    
+    private func fetchMostRecent(_ identifier: HKQuantityTypeIdentifier) async -> (value: Double, date: Date)? {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
+            return nil
+        }
+        
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        
+        return await withCheckedContinuation { continuation in
+            let wrappedQuery = HKSampleQuery(
+                sampleType: quantityType,
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: [sortDescriptor]
+            ) { _, samples, error in
+                guard error == nil,
+                      let sample = samples?.first as? HKQuantitySample else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                
+                let unit: HKUnit
+                switch identifier {
+                case .bodyMass, .leanBodyMass:
+                    unit = .gramUnit(with: .kilo)
+                case .bodyFatPercentage:
+                    unit = .percent()
+                case .bodyMassIndex:
+                    unit = .count()
+                default:
+                    unit = .count()
+                }
+                
+                let value = sample.quantity.doubleValue(for: unit)
+                continuation.resume(returning: (value: value, date: sample.endDate))
+            }
+            
+            healthStore.execute(wrappedQuery)
+        }
+    }
+    
+    func fetchHistoricalData(for identifier: HKQuantityTypeIdentifier, timeRange: TimeRange) async -> [HealthDataPoint] {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
+            return []
+        }
+        
+        let endDate = Date()
+        let startDate: Date
+        
+        switch timeRange {
+        case .week:
+            startDate = Calendar.current.date(byAdding: .day, value: -7, to: endDate) ?? endDate
+        case .month:
+            startDate = Calendar.current.date(byAdding: .month, value: -1, to: endDate) ?? endDate
+        case .sixMonths:
+            startDate = Calendar.current.date(byAdding: .month, value: -6, to: endDate) ?? endDate
+        case .year:
+            startDate = Calendar.current.date(byAdding: .year, value: -1, to: endDate) ?? endDate
+        case .all:
+            startDate = Calendar.current.date(byAdding: .year, value: -10, to: endDate) ?? endDate
+        }
+        
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictEndDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: quantityType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, samples, error in
+                guard error == nil,
+                      let samples = samples as? [HKQuantitySample] else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                
+                let unit: HKUnit
+                switch identifier {
+                case .bodyMass, .leanBodyMass:
+                    unit = .gramUnit(with: .kilo)
+                case .bodyFatPercentage:
+                    unit = .percent()
+                case .bodyMassIndex:
+                    unit = .count()
+                default:
+                    unit = .count()
+                }
+                
+                let dataPoints = samples.map { sample in
+                    var value = sample.quantity.doubleValue(for: unit)
+                    // Convert body fat percentage to percentage (0-100)
+                    if identifier == .bodyFatPercentage {
+                        value *= 100
+                    }
+                    return HealthDataPoint(date: sample.endDate, value: value)
+                }
+                
+                continuation.resume(returning: dataPoints)
+            }
+            
+            healthStore.execute(query)
+        }
+    }
+    
+    func saveHealthData(type: HKQuantityTypeIdentifier, value: Double, date: Date) async -> Bool {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: type) else {
+            print("⚠️ Unable to get quantity type for \(type)")
+            return false
+        }
+        
+        // Create the appropriate unit based on the type
+        let unit: HKUnit
+        switch type {
+        case .bodyFatPercentage:
+            unit = .percent()
+        case .bodyMassIndex:
+            unit = .count()
+        case .leanBodyMass, .bodyMass:
+            unit = .gramUnit(with: .kilo)
+        default:
+            unit = .count()
+        }
+        
+        let quantity = HKQuantity(unit: unit, doubleValue: value)
+        let sample = HKQuantitySample(type: quantityType, quantity: quantity, start: date, end: date)
+        
+        do {
+            try await healthStore.save(sample)
+            print("✅ Successfully saved \(type.rawValue) data to HealthKit")
+            return true
+        } catch {
+            print("❌ Error saving to HealthKit: \(error.localizedDescription)")
+            return false
+        }
+    }
+    
+    func deleteHealthData(identifier: HKQuantityTypeIdentifier, date: Date) async -> Bool {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
+            print("⚠️ Unable to get quantity type for \(identifier)")
+            return false
+        }
+        
+        // Create a predicate to find samples at the specific date
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? date
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+        
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: quantityType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                if let error = error {
+                    print("❌ Error querying samples to delete: \(error.localizedDescription)")
+                    continuation.resume(returning: false)
+                    return
+                }
+                
+                guard let samples = samples, !samples.isEmpty else {
+                    print("⚠️ No samples found to delete")
+                    continuation.resume(returning: false)
+                    return
+                }
+                
+                self.healthStore.delete(samples) { success, error in
+                    if let error = error {
+                        print("❌ Error deleting samples: \(error.localizedDescription)")
+                        continuation.resume(returning: false)
+                    } else if success {
+                        print("✅ Successfully deleted \(samples.count) sample(s)")
+                        continuation.resume(returning: true)
+                    } else {
+                        continuation.resume(returning: false)
+                    }
+                }
+            }
+            
+            self.healthStore.execute(query)
+        }
+    }
+}
+
+enum TimeRange: String, CaseIterable, Identifiable {
+    case week = "Week"
+    case month = "Month"
+    case sixMonths = "6 Months"
+    case year = "Year"
+    case all = "All"
+    
+    var id: String { rawValue }
 }

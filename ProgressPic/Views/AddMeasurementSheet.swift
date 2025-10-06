@@ -6,12 +6,11 @@ struct AddMeasurementSheet: View {
     @Environment(\.modelContext) private var ctx
 
     let journey: Journey
+    let measurementType: MeasurementType
 
-    @State private var type: MeasurementType = .bicepsRight
     @State private var date: Date = .now
     @State private var unit: MeasureUnit = .cm
     @State private var valueString: String = ""
-    @State private var customLabel: String = ""
 
     var body: some View {
         NavigationStack {
@@ -19,15 +18,14 @@ struct AddMeasurementSheet: View {
                 Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
                 
                 Form {
-                Section("Type") {
-                    Picker("Measurement", selection: $type) {
-                        ForEach(MeasurementType.allCases) { t in Text(t.title).tag(t) }
+                Section {
+                    HStack {
+                        Text("Type")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(measurementType.title)
+                            .foregroundColor(.white)
                     }
-                    .onChange(of: type) { unit = defaultUnit(for: type) }
-                }
-
-                if type == .custom {
-                    Section("Custom name") { TextField("e.g. Neck", text: $customLabel) }
                 }
 
                 Section("Value") {
@@ -35,7 +33,7 @@ struct AddMeasurementSheet: View {
                         TextField("0.0", text: $valueString)
                             .keyboardType(.decimalPad)
                         Picker("", selection: $unit) {
-                            ForEach(units(for: type)) { u in Text(u.rawValue.uppercased()).tag(u) }
+                            ForEach(units(for: measurementType)) { u in Text(u.rawValue.uppercased()).tag(u) }
                         }
                         .pickerStyle(.segmented)
                         .frame(maxWidth: 220)
@@ -46,7 +44,7 @@ struct AddMeasurementSheet: View {
                     DatePicker("When", selection: $date, displayedComponents: [.date, .hourAndMinute])
                 }
 
-                Section("How to measure") { guide(for: type) }
+                Section("How to measure") { guide(for: measurementType) }
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -64,10 +62,10 @@ struct AddMeasurementSheet: View {
                         let entry = MeasurementEntry(
                             journeyId: journey.id,
                             date: date,
-                            type: type,
+                            type: measurementType,
                             value: value,
                             unit: unit,
-                            label: type == .custom ? (customLabel.isEmpty ? "Custom" : customLabel) : nil
+                            label: nil
                         )
                         ctx.insert(entry)
                         dismiss()
@@ -79,7 +77,7 @@ struct AddMeasurementSheet: View {
                 }
             }
         }
-        .onAppear { unit = defaultUnit(for: type) }
+        .onAppear { unit = defaultUnit(for: measurementType) }
     }
 
     // Units per type
@@ -87,8 +85,12 @@ struct AddMeasurementSheet: View {
         switch t {
         case .weight: return [.kg, .lb]
         case .bodyFat: return [.percent]
-        case .chest, .waist, .hips, .bicepsLeft, .bicepsRight, .thigh, .calf: return [.cm, .inch]
-        case .custom: return [.kg, .lb, .cm, .inch, .percent]
+        case .chest, .waist, .hips, .neck,
+             .bicepsLeft, .bicepsRight,
+             .forearmLeft, .forearmRight,
+             .thighLeft, .thighRight,
+             .calfLeft, .calfRight: return [.cm, .inch]
+        case .custom: return [.cm] // Fallback (shouldn't be reached)
         }
     }
     func defaultUnit(for t: MeasurementType) -> MeasureUnit { units(for: t).first ?? .cm }
@@ -104,26 +106,31 @@ struct AddMeasurementSheet: View {
             bullet("Use the same device/method each time (e.g., smart scale or calipers).")
             bullet("Measure under similar hydration conditions.")
         case .chest:
-            bullet("Tape around chest at nipple line, under armpits.")
-            bullet("Stand tall; exhale normally; tape snug, not tight.")
+            bullet("Measure around the fullest part of your chest at nipple level.")
+            bullet("Stand tall, breathe normally, keep tape snug but not tight.")
         case .waist:
-            bullet("Find the narrowest point above the navel.")
-            bullet("Relax abdomen; don’t suck in.")
+            bullet("Measure at the narrowest point of your torso, above your belly button.")
+            bullet("Stand naturally, don't suck in your abdomen.")
         case .hips:
-            bullet("Around the widest part of butt/hips.")
-            bullet("Stand feet together, weight evenly distributed.")
+            bullet("Measure at the widest part of your hips and buttocks.")
+            bullet("Stand with feet together, weight evenly distributed.")
+        case .neck:
+            bullet("Measure around the middle of your neck, below the Adam's apple.")
+            bullet("Keep the tape snug but comfortable, don't pull tight.")
         case .bicepsLeft, .bicepsRight:
-            bullet("Halfway between shoulder and elbow.")
-            bullet("Arm relaxed by your side; use same side each time.")
-        case .thigh:
-            bullet("About 15 cm above the top of the kneecap.")
-            bullet("Stand upright; tape parallel to the floor.")
-        case .calf:
-            bullet("At the widest point of the calf.")
-            bullet("Even pressure all around the limb.")
+            bullet("Measure around the largest part of your upper arm when flexed.")
+            bullet("Flex your arm to show the peak of the muscle.")
+        case .forearmLeft, .forearmRight:
+            bullet("Measure around the widest part of your lower arm near the elbow.")
+            bullet("Keep your arm relaxed at your side.")
+        case .thighLeft, .thighRight:
+            bullet("Measure around the largest part of your upper leg.")
+            bullet("Stand upright, keep tape parallel to the floor.")
+        case .calfLeft, .calfRight:
+            bullet("Measure around the largest part of your lower leg.")
+            bullet("Stand naturally, tape snug with even pressure all around.")
         case .custom:
-            bullet("Define a clear landmark and always measure at the same spot.")
-            bullet("Keep tape snug, parallel to the floor when applicable.")
+            bullet("Custom measurement.") // Fallback (shouldn't be reached)
         }
     }
     func bullet(_ text: String) -> some View {

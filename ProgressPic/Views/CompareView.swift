@@ -423,8 +423,29 @@ struct CompareCanvas: View {
             } else { ProgressView().frame(height: 420) }
         }
         .task {
-            leftImg = await PhotoStore.fetchUIImage(localId: left.assetLocalId)
-            rightImg = await PhotoStore.fetchUIImage(localId: right.assetLocalId)
+            // Capture localIds on main actor to avoid Sendable warnings
+            let leftLocalId = left.assetLocalId
+            let rightLocalId = right.assetLocalId
+            
+            // Load images at screen-appropriate size to reduce memory usage
+            // Compare view doesn't need full resolution - screen size is sufficient
+            let screenSize = UIScreen.main.bounds.size
+            let scale = UIScreen.main.scale
+            let targetSize = CGSize(
+                width: screenSize.width * scale,
+                height: screenSize.height * scale
+            )
+            
+            print("🔍 Loading compare images at: \(Int(targetSize.width))x\(Int(targetSize.height))")
+            
+            // Load both images concurrently
+            async let leftTask = PhotoStore.fetchUIImage(localId: leftLocalId, targetSize: targetSize)
+            async let rightTask = PhotoStore.fetchUIImage(localId: rightLocalId, targetSize: targetSize)
+            
+            leftImg = await leftTask
+            rightImg = await rightTask
+            
+            print("✅ Compare images loaded")
         }
     }
 }

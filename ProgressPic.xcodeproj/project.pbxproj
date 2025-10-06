@@ -29,9 +29,22 @@
 		0DD0ED0B2E73273300E9819F /* ProgressPicUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProgressPicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0DD0ECFA2E73273200E9819F /* Exceptions for "ProgressPic" folder in "ProgressPic" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Resources/ProgressPicInfo.plist,
+			);
+			target = 0DD0ECF32E73273200E9819F /* ProgressPic */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0DD0ECF62E73273200E9819F /* ProgressPic */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0DD0ECFA2E73273200E9819F /* Exceptions for "ProgressPic" folder in "ProgressPic" target */,
+			);
 			path = ProgressPic;
 			sourceTree = "<group>";
 		};

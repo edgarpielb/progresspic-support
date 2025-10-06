@@ -35,6 +35,16 @@ struct ContentView: View {
             Task {
                 await fixOrphanedPhotos()
             }
+            
+            // Add app-wide memory warning handler
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                print("⚠️ App-wide memory warning - clearing image cache")
+                PhotoStore.clearCache()
+            }
         }
     }
     

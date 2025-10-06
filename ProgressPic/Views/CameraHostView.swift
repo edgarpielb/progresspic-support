@@ -14,175 +14,317 @@ struct CameraHostView: View {
     @State private var lastGhost: UIImage?
     @State private var latestPhotoThumbnail: UIImage?
     @State private var showPhotoLibrary = false
-    @State private var flashMode: AVCaptureDevice.FlashMode = .off
     @State private var timerSeconds = 0
     @State private var timerActive = false
     @State private var countdownSeconds = 0
-    @State private var ghostEnabled = true
+    @State private var ghostEnabled = false
     @State private var showGhostControls = false
     @State private var showTimerControls = false
-
-    @Query private var allPhotos: [ProgressPhoto]
-    
-    var photos: [ProgressPhoto] {
-        guard let journeyId = selectedJourney?.id else { return [] }
-        return allPhotos.filter { $0.journeyId == journeyId }
-    }
+    @State private var orientationObserver: NSObjectProtocol?
+    @State private var ghostLoadTask: Task<Void, Never>?
+    @State private var backgroundObserver: NSObjectProtocol?
+    @State private var photos: [ProgressPhoto] = []
+    @State private var showErrorAlert = false
+    @State private var errorMessage = ""
 
     init(journey: Journey? = nil) {
-        self.selectedJourney = journey
-        _allPhotos = Query(sort: \ProgressPhoto.date, order: .forward)
+        self._selectedJourney = State(initialValue: journey)
+    }
+    
+    // MARK: - Computed Views
+    
+    private var journeySelector: some View {
+        HStack {
+            // Journey selector dropdown
+            Menu {
+                ForEach(journeys) { journey in
+                    Button(journey.name) {
+                        selectedJourney = journey
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "folder")
+                    Text(selectedJourney?.name ?? "Select Journey")
+                    Image(systemName: "chevron.down")
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.4).background(.ultraThinMaterial))
+                .cornerRadius(20)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+    }
+    
+    private var zoomButtons: some View {
+        HStack(spacing: 30) {
+            // Zoom out button (-)
+            Button(action: {
+                camera.zoomOut()
+            }) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(camera.currentZoom <= 1.0 ? .gray.opacity(0.5) : .white)
+            }
+            .disabled(camera.currentZoom <= 1.0)
+            
+            // Zoom in button (+)
+            Button(action: {
+                camera.zoomIn()
+            }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(camera.currentZoom >= camera.maxZoom ? .gray.opacity(0.5) : .white)
+            }
+            .disabled(camera.currentZoom >= camera.maxZoom)
+        }
+    }
+    
+    private var cameraPreviewSection: some View {
+        GeometryReader { geometry in
+            let dimensions = calculateCameraDimensions(geometry: geometry)
+            cameraPreviewContent(cropW: dimensions.width, cropH: dimensions.height, geometry: geometry)
+        }
+    }
+    
+    private func calculateCameraDimensions(geometry: GeometryProxy) -> (width: CGFloat, height: CGFloat) {
+        // Fullscreen immersive view - use entire available space
+        return (geometry.size.width, geometry.size.height)
+    }
+    
+    @ViewBuilder
+    private func cameraPreviewContent(cropW: CGFloat, cropH: CGFloat, geometry: GeometryProxy) -> some View {
+        if camera.isAuthorized {
+            // Fullscreen immersive camera view
+            ZStack {
+                // Camera preview - fullscreen
+                CameraPreviewLayerView(layer: $camera.previewLayer, cameraService: camera)
+                    .frame(width: cropW, height: cropH)
+                    .clipped()
+
+                // Ghost overlay (previous or first)
+                if ghostEnabled, let img = lastGhost {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: cropW, height: cropH)
+                        .clipped()
+                        .opacity(ghostOpacity)
+                        .blendMode(.plusLighter)
+                        .allowsHitTesting(false)
+                }
+                
+                // Timer countdown overlay
+                if timerActive && countdownSeconds > 0 {
+                    Text("\(countdownSeconds)")
+                        .font(.system(size: 120, weight: .bold))
+                        .foregroundColor(.white)
+                        .shadow(color: .black, radius: 10)
+                }
+                
+                // Overlaid ghost and timer controls on the camera
+                VStack {
+                    Spacer()
+                    
+                    VStack(spacing: 12) {
+                        // Ghost controls (when active) - overlaid on camera
+                        if showGhostControls && ghostEnabled {
+                            ghostControlsView
+                        }
+                        
+                        // Timer controls (when active) - overlaid on camera
+                        if showTimerControls {
+                            timerControlsView
+                        }
+                    }
+                    .padding(.bottom, 20)
+                }
+                .frame(width: cropW, height: cropH)
+            }
+            .frame(width: cropW, height: cropH)
+        } else {
+            // Camera permission not granted - fullscreen
+            VStack(spacing: 20) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.white.opacity(0.6))
+                
+                Text("Camera Access Required")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                
+                Text("Please allow camera access in Settings to take progress photos.")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Button("Open Settings") {
+                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsUrl)
+                    }
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.2))
+                .cornerRadius(10)
+            }
+            .frame(width: cropW, height: cropH)
+            .background(Color.black.opacity(0.8))
+        }
     }
 
     var body: some View {
         ZStack {
-            // Full screen camera preview
-            if camera.isAuthorized {
-                CameraPreviewLayerView(layer: $camera.previewLayer)
-                    .ignoresSafeArea()
-
-                // Ghost overlay (previous or first)
-                if ghostEnabled, let img = lastGhost {
-                    GeometryReader { geometry in
-                        Image(uiImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: geometry.size.width, height: geometry.size.height)
-                            .opacity(ghostOpacity)
-                            .blendMode(.plusLighter)
-                    }
-                    .ignoresSafeArea()
-                }
-            } else {
-                // Dark background when no camera access
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
-                
-                // Camera permission not granted
-                VStack(spacing: 20) {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.white.opacity(0.6))
-                    
-                    Text("Camera Access Required")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                    
-                    Text("Please allow camera access in Settings to take progress photos.")
-                        .font(.body)
-                        .foregroundColor(.white.opacity(0.8))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    
-                    Button("Open Settings") {
-                        if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(settingsUrl)
-                        }
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.2))
-                    .cornerRadius(10)
-                }
-            }
-
-            // UI Overlay
+            // Fullscreen camera preview
+            cameraPreviewSection
+                .ignoresSafeArea()
+            
+            // Overlaid UI elements
             VStack(spacing: 0) {
                 // Top section with journey selector
                 HStack {
-                    // Journey selector dropdown
-                    Menu {
-                        ForEach(journeys) { journey in
-                            Button(journey.name) {
-                                selectedJourney = journey
-                                Task { await loadGhost() }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "folder")
-                            Text(selectedJourney?.name ?? "Select Journey")
-                            Image(systemName: "chevron.down")
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(20)
-                    }
-                    
+                    journeySelector
                     Spacer()
-                    
-                    // Camera flip button
-                    Button { camera.flip() } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath.camera")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
                 
                 Spacer()
                 
-                // Timer countdown overlay
-                if timerActive && countdownSeconds > 0 {
-                    VStack {
-                        Spacer()
-                        Text("\(countdownSeconds)")
-                            .font(.system(size: 120, weight: .bold))
-                            .foregroundColor(.white)
-                            .shadow(color: .black, radius: 10)
-                        Spacer()
-                    }
+                // Bottom rounded control section
+                VStack(spacing: 0) {
+                    // Zoom controls
+                    zoomButtons
+                        .padding(.top, 20)
+                        .padding(.bottom, 16)
+                    
+                    // Main camera controls
+                    cameraControls
+                        .padding(.bottom, 100) // Space for tab bar
                 }
-                
-                // Ghost controls overlay (bottom-right)
-                if showGhostControls && ghostEnabled {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            ghostControlsView
-                                .padding(.trailing, 24)
-                                .padding(.bottom, 200)
-                        }
-                    }
-                }
-                
-                // Timer controls overlay (compact, bottom-right)
-                if showTimerControls {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            timerControlsView
-                                .padding(.trailing, 24)
-                                .padding(.bottom, 200)
-                        }
-                    }
-                }
-                
-                // Bottom camera controls
-                cameraControls
-                    .padding(.bottom, 140) // Space for tab bar
+                .background(
+                    Color.black.opacity(0.4)
+                        .background(.ultraThinMaterial)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .padding(.horizontal, 0)
             }
         }
+        .background(Color.black)
         .onAppear {
-            camera.start()
-            if selectedJourney == nil, let firstJourney = journeys.first {
-                selectedJourney = firstJourney
-            }
+            print("👁️ CameraHostView appeared")
+            
+            // Initialize camera when view appears
             Task {
+                // Setup journey first (sync, fast)
+                if selectedJourney == nil, let firstJourney = journeys.first {
+                    selectedJourney = firstJourney
+                }
+                fetchPhotosForSelectedJourney()
+                
+                // Request camera permission if needed (first time only)
+                if !camera.isAuthorized {
+                    print("🔐 Requesting camera permission...")
+                    await camera.requestPermissionIfNeeded()
+                }
+                
+                // Start camera session (works for both first time and returning from other views)
+                if camera.isAuthorized {
+                    print("▶️ Starting/Restarting camera session...")
+                    camera.start()
+                }
+                
+                // Request photo library access and load images (first time only)
                 _ = await PhotoStore.requestAuthorization()
-                await loadGhost()
+                startLoadingGhost()
+                await loadLatestThumbnail()
+            }
+            
+            // Observe device orientation changes
+            orientationObserver = NotificationCenter.default.addObserver(
+                forName: UIDevice.orientationDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                Task { @MainActor in
+                    camera.updateOrientation()
+                }
+            }
+            
+            // Observe app going to background to free memory
+            backgroundObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                print("📱 App entered background, releasing ghost image")
+                ghostLoadTask?.cancel()
+                lastGhost = nil
+            }
+            
+            // Observe memory warnings to clear cache
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                print("⚠️ Memory warning received, clearing image cache")
+                PhotoStore.clearCache()
+                // Also release ghost if not actively visible
+                if !ghostEnabled {
+                    lastGhost = nil
+                }
+            }
+        }
+        .onDisappear {
+            print("👋 CameraHostView disappeared")
+            
+            // Remove orientation observer
+            if let observer = orientationObserver {
+                NotificationCenter.default.removeObserver(observer)
+                orientationObserver = nil
+            }
+            
+            // Remove background observer
+            if let observer = backgroundObserver {
+                NotificationCenter.default.removeObserver(observer)
+                backgroundObserver = nil
+            }
+            
+            // Cancel any ongoing ghost load
+            ghostLoadTask?.cancel()
+            
+            // Stop camera session (but don't clean up preview layer)
+            // This allows quick restart when returning to this view
+            camera.stop()
+        }
+        .onChange(of: camera.isAuthorized) { _, ok in
+            // Camera start is handled in onAppear task
+            // This prevents duplicate start calls
+            print("📹 Camera authorization changed: \(ok)")
+        }
+        .onChange(of: selectedJourney) { _, newJourney in
+            // Fetch photos when journey changes
+            fetchPhotosForSelectedJourney()
+            
+            // Reload ghost and thumbnail for new journey
+            startLoadingGhost()
+            Task {
                 await loadLatestThumbnail()
             }
         }
-        .onDisappear { camera.stop() }
-        .onChange(of: camera.isAuthorized) { _, ok in     // <- start when auth flips to true
-            if ok { camera.start() }
+        .onChange(of: camera.latestPhoto) { _, newPhoto in
+            // Reactively show adjust view when photo is captured
+            if newPhoto != nil {
+                print("✅ Photo captured, showing adjust view")
+                showAdjust = true
+            }
         }
         .sheet(isPresented: $showAdjust) {
             if let latest = camera.latestPhoto {
@@ -193,7 +335,30 @@ struct CameraHostView: View {
                         p.journey = journey  // Set the relationship
                         ctx.insert(p)
                         if journey.coverAssetLocalId == nil { journey.coverAssetLocalId = savedId }
-                        Task { await loadLatestThumbnail() }
+                        
+                        // Save context and handle errors
+                        do {
+                            try ctx.save()
+                            print("✅ Photo saved to SwiftData")
+                        } catch {
+                            print("❌ Error saving photo: \(error)")
+                            errorMessage = "Failed to save photo: \(error.localizedDescription)"
+                            showErrorAlert = true
+                        }
+                        
+                        // Refresh photos list to include new photo
+                        fetchPhotosForSelectedJourney()
+                        
+                        // Clear latestPhoto to free memory and prepare for next capture
+                        camera.latestPhoto = nil
+                        print("🧹 Cleared latestPhoto after save")
+                        
+                        // Refresh ghost and thumbnail to show the newly captured photo
+                        Task {
+                            await loadLatestThumbnail()
+                        }
+                        startLoadingGhost()
+                        print("🔄 Refreshed ghost and thumbnail after capture")
                     }
                 })
             }
@@ -208,31 +373,42 @@ struct CameraHostView: View {
                     .background(Color(red: 30/255, green: 32/255, blue: 35/255))
             }
         }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
     }
 
     var cameraControls: some View {
-        HStack {
-            // Left: Photo thumbnail
-            Button(action: {
-                showPhotoLibrary = true
-            }) {
+        HStack(spacing: 0) {
+            // Camera flip button
+            Button { camera.flip() } label: {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.1))
+                    Circle()
+                        .fill(Color.white.opacity(0.2))
                         .frame(width: 50, height: 50)
                     
-                    if let thumbnail = latestPhotoThumbnail {
-                        Image(uiImage: thumbnail)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 50, height: 50)
-                            .clipped()
-                            .cornerRadius(8)
-                    } else {
-                        Image(systemName: "photo")
-                            .foregroundColor(.white)
-                            .font(.title2)
-                    }
+                    Image(systemName: "arrow.triangle.2.circlepath.camera")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                }
+            }
+            
+            Spacer()
+            
+            // Ghost button
+            Button(action: {
+                toggleGhostMode()
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 50, height: 50)
+                    
+                    Image(systemName: ghostEnabled ? "eye.fill" : "eye")
+                        .foregroundColor(ghostEnabled ? .cyan : .white)
+                        .font(.system(size: 24))
                 }
             }
             
@@ -248,12 +424,12 @@ struct CameraHostView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(Color.white)
-                        .frame(width: 80, height: 80)
+                        .strokeBorder(Color.white.opacity(0.5), lineWidth: 4)
+                        .frame(width: 84, height: 84)
                     
                     Circle()
-                        .strokeBorder(Color.black.opacity(0.1), lineWidth: 2)
-                        .frame(width: 80, height: 80)
+                        .fill(Color.white)
+                        .frame(width: 70, height: 70)
                 }
             }
             .buttonStyle(.plain)
@@ -262,45 +438,109 @@ struct CameraHostView: View {
             
             Spacer()
             
-            // Right: Settings/Options
-            VStack(spacing: 16) {
-                // Ghost mode toggle button
-                Button(action: {
-                    toggleGhostMode()
-                }) {
-                    Image(systemName: ghostEnabled ? "eye.fill" : "eye")
-                        .foregroundColor(ghostEnabled ? .cyan : .white)
-                        .font(.title2)
-                        .frame(width: 50, height: 50)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(Circle())
+            // Timer button
+            Button(action: {
+                showTimerControls.toggle()
+                if showTimerControls {
+                    showGhostControls = false
                 }
-                
-                // Timer button
-                Button(action: {
-                    showTimerControls.toggle()
-                }) {
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 50, height: 50)
+                    
                     Image(systemName: timerActive ? "timer.circle.fill" : "timer")
                         .foregroundColor(timerActive ? .orange : .white)
-                        .font(.title2)
+                        .font(.system(size: 24))
+                }
+            }
+            
+            Spacer()
+            
+            // Flash button
+            Button(action: {
+                camera.cycleFlashMode()
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.2))
                         .frame(width: 50, height: 50)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(Circle())
+                    
+                    Image(systemName: camera.flashMode == .on ? "bolt.fill" : (camera.flashMode == .auto ? "bolt.badge.automatic" : "bolt.slash"))
+                        .foregroundColor(camera.flashMode == .off ? .white : .yellow)
+                        .font(.system(size: 24))
                 }
             }
         }
-        .padding(.horizontal, 30)
+        .padding(.horizontal, 20)
     }
 
 
+    /// Fetch photos for the currently selected journey using a scoped query
+    /// This is more efficient than fetching all photos and filtering in memory
+    func fetchPhotosForSelectedJourney() {
+        guard let journeyId = selectedJourney?.id else {
+            photos = []
+            return
+        }
+        
+        // Use a filtered fetch descriptor for efficient querying
+        let descriptor = FetchDescriptor<ProgressPhoto>(
+            predicate: #Predicate { $0.journeyId == journeyId },
+            sortBy: [SortDescriptor(\ProgressPhoto.date, order: .forward)]
+        )
+        
+        do {
+            photos = try ctx.fetch(descriptor)
+            print("📸 Fetched \(photos.count) photos for journey: \(selectedJourney?.name ?? "unknown")")
+        } catch {
+            print("❌ Error fetching photos: \(error)")
+            photos = []
+        }
+    }
+    
+    func startLoadingGhost() {
+        // Cancel any previous ghost loading task to prevent overlapping loads
+        ghostLoadTask?.cancel()
+        
+        ghostLoadTask = Task {
+            await loadGhost()
+        }
+    }
+    
     func loadGhost() async {
-        guard selectedJourney != nil else { lastGhost = nil; return }
+        guard selectedJourney != nil else { 
+            lastGhost = nil
+            return 
+        }
+        
+        // Calculate appropriate target size for ghost image (screen resolution)
+        let screenSize = UIScreen.main.bounds.size
+        let scale = UIScreen.main.scale
+        // Use actual pixel dimensions for better quality on retina displays
+        let targetSize = CGSize(
+            width: screenSize.width * scale,
+            height: screenSize.height * scale
+        )
+        
+        print("👻 Loading ghost image at target size: \(Int(targetSize.width))x\(Int(targetSize.height))")
+        
+        // Check if task was cancelled before loading
+        guard !Task.isCancelled else {
+            print("👻 Ghost load cancelled")
+            return
+        }
+        
         if useFirst, let first = photos.first {
-            lastGhost = await PhotoStore.fetchUIImage(localId: first.assetLocalId)
+            lastGhost = await PhotoStore.fetchUIImage(localId: first.assetLocalId, targetSize: targetSize)
+            print("👻 Loaded first photo as ghost")
         } else if let last = photos.last {
-            lastGhost = await PhotoStore.fetchUIImage(localId: last.assetLocalId)
+            lastGhost = await PhotoStore.fetchUIImage(localId: last.assetLocalId, targetSize: targetSize)
+            print("👻 Loaded last photo as ghost")
         } else {
             lastGhost = nil
+            print("👻 No photos available for ghost")
         }
     }
     
@@ -313,9 +553,8 @@ struct CameraHostView: View {
     }
     
     func toggleFlash() {
-        flashMode = flashMode == .off ? .on : .off
-        // Note: Flash control would need to be implemented in CameraService
-        // For now, this just toggles the UI state
+        camera.flashMode = camera.flashMode == .off ? .on : .off
+        print("💡 Flash toggled to: \(camera.flashMode == .on ? "ON" : "OFF")")
     }
     
     func toggleGhostMode() {
@@ -323,16 +562,11 @@ struct CameraHostView: View {
         ghostEnabled.toggle()
         if ghostEnabled {
             showGhostControls = true
-            Task { await loadGhost() }
-            
-            // Auto-hide controls after 3 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                if self.ghostEnabled {
-                    self.showGhostControls = false
-                }
-            }
+            showTimerControls = false // Close timer controls when opening ghost
+            startLoadingGhost()
         } else {
             showGhostControls = false
+            ghostLoadTask?.cancel()  // Cancel any ongoing ghost load
             lastGhost = nil
         }
     }
@@ -340,25 +574,7 @@ struct CameraHostView: View {
     func capturePhoto() {
         print("📸 Capture button pressed")
         camera.capturePhoto()
-        
-        // Wait for photo to be captured before showing adjust view
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if self.camera.latestPhoto != nil {
-                print("✅ Photo captured, showing adjust view")
-                self.showAdjust = true
-            } else {
-                print("⚠️ No photo captured, retrying...")
-                // Retry after a bit more time
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if self.camera.latestPhoto != nil {
-                        print("✅ Photo captured on retry, showing adjust view")
-                        self.showAdjust = true
-                    } else {
-                        print("❌ Photo capture failed")
-                    }
-                }
-            }
-        }
+        // Note: showAdjust will be triggered by onChange(of: camera.latestPhoto)
     }
     
     func startTimerCapture() {
@@ -427,7 +643,7 @@ struct CameraHostView: View {
             // First/Last toggle
             Button(action: {
                 useFirst.toggle()
-                Task { await loadGhost() }
+                startLoadingGhost()
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: useFirst ? "1.circle.fill" : "arrow.clockwise")
@@ -446,27 +662,94 @@ struct CameraHostView: View {
 
 struct CameraPreviewLayerView: UIViewRepresentable {
     @Binding var layer: AVCaptureVideoPreviewLayer?
+    @ObservedObject var cameraService: CameraService
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0)
+        
+        // Add pinch gesture for native zoom
+        let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        view.addGestureRecognizer(pinchGesture)
+        
         return view
     }
     
+    func makeCoordinator() -> Coordinator {
+        Coordinator(layer: $layer, cameraService: cameraService)
+    }
+    
+    class Coordinator: NSObject {
+        var layer: Binding<AVCaptureVideoPreviewLayer?>
+        var cameraService: CameraService
+        var initialZoom: CGFloat = 1.0
+        
+        init(layer: Binding<AVCaptureVideoPreviewLayer?>, cameraService: CameraService) {
+            self.layer = layer
+            self.cameraService = cameraService
+        }
+        
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let layer = layer.wrappedValue,
+                  let device = layer.session?.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first else {
+                return
+            }
+            
+            if gesture.state == .began {
+                initialZoom = device.videoZoomFactor
+            }
+            
+            do {
+                try device.lockForConfiguration()
+                
+                let maxZoom = min(device.activeFormat.videoMaxZoomFactor, 5.0)
+                let newZoom = min(max(initialZoom * gesture.scale, 1.0), maxZoom)
+                device.videoZoomFactor = newZoom
+                
+                device.unlockForConfiguration()
+                
+                // Update published zoom values
+                if gesture.state == .ended || gesture.state == .changed {
+                    DispatchQueue.main.async {
+                        self.cameraService.currentZoom = newZoom
+                        self.cameraService.maxZoom = maxZoom
+                    }
+                }
+            } catch {
+                print("❌ Zoom error: \(error)")
+            }
+        }
+    }
+    
     func updateUIView(_ uiView: UIView, context: Context) {
-        guard let previewLayer = layer else { return }
+        guard let previewLayer = layer else {
+            // Remove all preview layers if layer is nil
+            uiView.layer.sublayers?.removeAll(where: { $0 is AVCaptureVideoPreviewLayer })
+            return
+        }
 
-        // Remove any previous preview layer (but only those, and not if it's the same)
-        uiView.layer.sublayers?.removeAll(where: {
+        // Only remove other preview layers, not the current one
+        let layersToRemove = uiView.layer.sublayers?.filter {
             ($0 is AVCaptureVideoPreviewLayer) && ($0 !== previewLayer)
-        })
+        } ?? []
+        
+        // Remove old layers only if there are any
+        if !layersToRemove.isEmpty {
+            print("🧹 Removing \(layersToRemove.count) old preview layer(s)")
+            layersToRemove.forEach { $0.removeFromSuperlayer() }
+        }
 
+        // Add or update the preview layer
         if previewLayer.superlayer !== uiView.layer {
+            print("➕ Adding preview layer to view hierarchy")
             previewLayer.videoGravity = .resizeAspectFill
             previewLayer.frame = uiView.bounds
-            uiView.layer.addSublayer(previewLayer)
+            uiView.layer.insertSublayer(previewLayer, at: 0) // Insert at bottom
         } else {
-            previewLayer.frame = uiView.bounds
+            // Just update the frame if already attached (happens on rotation/resize)
+            if !previewLayer.frame.equalTo(uiView.bounds) {
+                previewLayer.frame = uiView.bounds
+            }
         }
     }
 }

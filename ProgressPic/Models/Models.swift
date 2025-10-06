@@ -4,28 +4,55 @@ import Photos
 
 // MARK: - Domain models (SwiftData + CloudKit)
 @Model
+final class JourneyReminder {
+    var id: UUID = UUID()
+    var hour: Int = 10
+    var minute: Int = 0
+    var daysBitmask: Int = 127 // All days by default (1-7 bits set)
+    var notificationText: String = "Time for a new photo!"
+    
+    var journey: Journey? = nil
+    
+    init(hour: Int, minute: Int, daysBitmask: Int, notificationText: String) {
+        self.id = UUID()
+        self.hour = hour
+        self.minute = minute
+        self.daysBitmask = daysBitmask
+        self.notificationText = notificationText
+    }
+    
+    var selectedDays: Set<Int> {
+        var days: Set<Int> = []
+        for day in 1...7 {
+            if daysBitmask & (1 << (day - 1)) != 0 {
+                days.insert(day)
+            }
+        }
+        return days
+    }
+}
+
+@Model
 final class Journey {
     var id: UUID = UUID()
     var name: String = ""
     var createdAt: Date = Date.now
     var coverAssetLocalId: String? = nil   // PHAsset localIdentifier
     var saveToCameraRoll: Bool = true
-    var reminderTimes: [DateComponents] = [] // user-custom times
     var template: String? = nil
 
     @Relationship(deleteRule: .cascade, inverse: \ProgressPhoto.journey) var photos: [ProgressPhoto]? = []
     @Relationship(deleteRule: .cascade, inverse: \MeasurementEntry.journey) var measurements: [MeasurementEntry]? = []
+    @Relationship(deleteRule: .cascade, inverse: \JourneyReminder.journey) var reminders: [JourneyReminder]? = []
 
     init(name: String,
          createdAt: Date = .now,
          saveToCameraRoll: Bool = true,
-         reminderTimes: [DateComponents] = [],
          template: String? = nil) {
         self.id = UUID()
         self.name = name
         self.createdAt = createdAt
         self.saveToCameraRoll = saveToCameraRoll
-        self.reminderTimes = reminderTimes
         self.template = template
     }
 }
@@ -82,8 +109,15 @@ final class MeasurementEntry {
 
 // MARK: - Enums & helpers
 enum MeasurementType: String, CaseIterable, Identifiable {
-    case weight, bodyFat, chest, waist, hips, bicepsLeft, bicepsRight, thigh, calf, custom
+    case weight, bodyFat, chest, waist, hips, neck
+    case bicepsLeft, bicepsRight
+    case forearmLeft, forearmRight
+    case thighLeft, thighRight
+    case calfLeft, calfRight
+    case custom
+    
     var id: String { rawValue }
+    
     var title: String {
         switch self {
         case .weight: return "Weight"
@@ -91,11 +125,55 @@ enum MeasurementType: String, CaseIterable, Identifiable {
         case .chest: return "Chest"
         case .waist: return "Waist"
         case .hips: return "Hips"
+        case .neck: return "Neck"
         case .bicepsLeft: return "Biceps (L)"
         case .bicepsRight: return "Biceps (R)"
-        case .thigh: return "Thigh"
-        case .calf: return "Calf"
+        case .forearmLeft: return "Forearm (L)"
+        case .forearmRight: return "Forearm (R)"
+        case .thighLeft: return "Thigh (L)"
+        case .thighRight: return "Thigh (R)"
+        case .calfLeft: return "Calf (L)"
+        case .calfRight: return "Calf (R)"
         case .custom: return "Custom"
+        }
+    }
+    
+    // Get the paired measurement (left <-> right)
+    var pairedMeasurement: MeasurementType? {
+        switch self {
+        case .bicepsLeft: return .bicepsRight
+        case .bicepsRight: return .bicepsLeft
+        case .forearmLeft: return .forearmRight
+        case .forearmRight: return .forearmLeft
+        case .thighLeft: return .thighRight
+        case .thighRight: return .thighLeft
+        case .calfLeft: return .calfRight
+        case .calfRight: return .calfLeft
+        default: return nil
+        }
+    }
+    
+    // Check if this measurement has a left/right variant
+    var hasPairedVariant: Bool {
+        return pairedMeasurement != nil
+    }
+    
+    // Get the base name without L/R
+    var baseName: String {
+        switch self {
+        case .bicepsLeft, .bicepsRight: return "Biceps"
+        case .forearmLeft, .forearmRight: return "Forearm"
+        case .thighLeft, .thighRight: return "Thigh"
+        case .calfLeft, .calfRight: return "Calf"
+        default: return title
+        }
+    }
+    
+    // Check if this is the left variant
+    var isLeft: Bool {
+        switch self {
+        case .bicepsLeft, .forearmLeft, .thighLeft, .calfLeft: return true
+        default: return false
         }
     }
 }
@@ -113,4 +191,38 @@ struct AlignTransform: Codable, Hashable {
     var rotation: Double  // radians
 
     static let identity = AlignTransform(scale: 1, offsetX: 0, offsetY: 0, rotation: 0)
+}
+
+// User Profile for health comparisons
+struct UserProfile: Codable {
+    var birthDate: Date?
+    var heightCm: Double?
+    var gender: Gender?
+    
+    enum Gender: String, Codable, CaseIterable {
+        case male = "Male"
+        case female = "Female"
+        case other = "Other"
+    }
+    
+    var age: Int? {
+        guard let birthDate = birthDate else { return nil }
+        let calendar = Calendar.current
+        let ageComponents = calendar.dateComponents([.year], from: birthDate, to: Date())
+        return ageComponents.year
+    }
+    
+    static func load() -> UserProfile {
+        if let data = UserDefaults.standard.data(forKey: "UserProfile"),
+           let profile = try? JSONDecoder().decode(UserProfile.self, from: data) {
+            return profile
+        }
+        return UserProfile()
+    }
+    
+    func save() {
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults.standard.set(data, forKey: "UserProfile")
+        }
+    }
 }

@@ -51,5 +51,9 @@
 	<string>ProgressPic can optionally save your progress photos to the photo library if you enable this feature.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ProgressPic needs photo library access to import existing photos into your journeys.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>ProgressPic needs access to your health data to display body composition metrics like weight, body fat percentage, and BMI.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>ProgressPic may save health data to help track your progress.</string>
 </dict>
 </plist>

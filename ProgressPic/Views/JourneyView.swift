@@ -171,9 +171,9 @@ struct JourneyDetailView: View {
     @Environment(\.modelContext) private var ctx
     @Environment(\.dismiss) private var dismiss
     @Query private var photos: [ProgressPhoto]
-    @State private var showImportPhotos = false
-    @State private var selectedPhoto: ProgressPhoto?
-    @State private var showPhotoDetail = false
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var isImportingPhotos = false
+    @State private var selectedPhotoForEdit: ProgressPhoto?
     @State private var showJourneySettings = false
     @State private var showCompareView = false
     @State private var showWatchView = false
@@ -235,9 +235,11 @@ struct JourneyDetailView: View {
                                     Text("Side by side photos")
                                         .font(.caption)
                                         .foregroundColor(.white.opacity(0.7))
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                
-                                Spacer()
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .padding()
                             .frame(height: 80)
@@ -262,9 +264,11 @@ struct JourneyDetailView: View {
                                     Text("Timeline playback")
                                         .font(.caption)
                                         .foregroundColor(.white.opacity(0.7))
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                
-                                Spacer()
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .padding()
                             .frame(height: 80)
@@ -276,9 +280,11 @@ struct JourneyDetailView: View {
                     .padding(.horizontal)
                     
                     // Import Photos Button
-                    Button(action: {
-                        showImportPhotos = true
-                    }) {
+                    PhotosPicker(
+                        selection: $selectedPhotoItems,
+                        maxSelectionCount: 20,
+                        matching: .images
+                    ) {
                         HStack(spacing: 12) {
                             Image(systemName: "photo.badge.plus")
                                 .font(.title2)
@@ -295,9 +301,15 @@ struct JourneyDetailView: View {
                             
                             Spacer()
                             
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.5))
+                            if isImportingPhotos {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
                         }
                         .padding()
                         .glassCard()
@@ -305,13 +317,13 @@ struct JourneyDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal)
+                    .disabled(isImportingPhotos)
                     
                     // Photo grid
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                         ForEach(photos) { photo in
                             Button(action: {
-                                selectedPhoto = photo
-                                showPhotoDetail = true
+                                selectedPhotoForEdit = photo
                             }) {
                                 PhotoGridItem(photo: photo)
                             }
@@ -349,13 +361,14 @@ struct JourneyDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showImportPhotos) {
-            ImportPhotosView(journey: journey)
-        }
-        .sheet(isPresented: $showPhotoDetail) {
-            if let selectedPhoto = selectedPhoto {
-                PhotoEditSheet(photo: selectedPhoto)     // NEW view below
+        .onChange(of: selectedPhotoItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task {
+                await importSelectedPhotos(newItems)
             }
+        }
+        .sheet(item: $selectedPhotoForEdit) { photo in
+            PhotoEditSheet(photo: photo)
         }
         .sheet(isPresented: $showJourneySettings) {
             JourneySettingsView(journey: journey, onJourneyDeleted: { journeyWasDeleted in
@@ -372,6 +385,82 @@ struct JourneyDetailView: View {
             JourneyWatchSheet(journey: journey, photos: photos)
         }
     }
+    
+    private func importSelectedPhotos(_ items: [PhotosPickerItem]) async {
+        await MainActor.run {
+            isImportingPhotos = true
+        }
+        
+        var successCount = 0
+        var errorCount = 0
+        
+        for (index, item) in items.enumerated() {
+            do {
+                // Load image data from PhotosPickerItem
+                guard let imageData = try await item.loadTransferable(type: Data.self),
+                      let uiImage = UIImage(data: imageData) else {
+                    errorCount += 1
+                    print("❌ Failed to load image data for item \(index + 1)")
+                    continue
+                }
+                
+                // Get creation date from metadata if available
+                var creationDate = Date()
+                if let assetIdentifier = item.itemIdentifier {
+                    let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+                    if let asset = fetchResult.firstObject {
+                        creationDate = asset.creationDate ?? Date()
+                    }
+                }
+                
+                // Save to app directory
+                let localId = try await PhotoStore.saveToAppDirectory(uiImage)
+                print("💾 Copied imported photo \(index + 1)/\(items.count) to app directory")
+                
+                // Create progress photo entry
+                await MainActor.run {
+                    let progressPhoto = ProgressPhoto(
+                        journeyId: journey.id,
+                        date: creationDate,
+                        assetLocalId: localId,
+                        isFrontCamera: false,
+                        alignTransform: .identity
+                    )
+                    progressPhoto.journey = journey
+                    ctx.insert(progressPhoto)
+                    
+                    // Save context periodically
+                    if index % 5 == 0 {
+                        do {
+                            try ctx.save()
+                        } catch {
+                            print("❌ Error saving context: \(error)")
+                        }
+                    }
+                }
+                
+                successCount += 1
+                print("✅ Successfully imported photo \(index + 1)/\(items.count)")
+                
+            } catch {
+                errorCount += 1
+                print("❌ Error importing photo \(index + 1): \(error)")
+            }
+        }
+        
+        // Final save
+        await MainActor.run {
+            do {
+                try ctx.save()
+                print("📸 Import complete: \(successCount) success, \(errorCount) errors")
+            } catch {
+                print("❌ Error saving final context: \(error)")
+            }
+            
+            isImportingPhotos = false
+            selectedPhotoItems = [] // Clear selection
+        }
+    }
 }
 
 struct PhotoGridItem: View {
@@ -379,75 +468,155 @@ struct PhotoGridItem: View {
     @State private var image: UIImage?
     @State private var isLoading = true
     @State private var loadFailed = false
+    @State private var loadTask: Task<Void, Never>?
     
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(0.06))
-            
-            if let img = image {
-                Image(uiImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .clipped()
-            } else if loadFailed {
-                VStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundColor(.orange)
-                        .font(.title2)
-                    Text("Failed")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
+        GeometryReader { geometry in
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.06))
+                
+                if let img = image {
+                    // Apply transform to show cropped version
+                    let transform = photo.alignTransform
+                    let itemHeight = geometry.size.width * 5.0/4.0 // 4:5 ratio height
+                    if transform.scale != 1 || transform.offsetX != 0 || transform.offsetY != 0 || transform.rotation != 0 {
+                        // Show transformed (cropped) version - render it properly for thumbnail
+                        let transformedImage = renderTransformedThumbnail(image: img, transform: transform, size: geometry.size.width)
+                        Image(uiImage: transformedImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geometry.size.width, height: itemHeight)
+                            .clipped()
+                            .transition(.opacity.animation(.easeIn(duration: 0.2)))
+                    } else {
+                        // Show original (no transform applied)
+                        Image(uiImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geometry.size.width, height: itemHeight)
+                            .clipped()
+                            .transition(.opacity.animation(.easeIn(duration: 0.2)))
+                    }
+                } else if loadFailed {
+                    Button(action: {
+                        Task { await loadImage() }
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(.cyan)
+                                .font(.title2)
+                            Text("Tap to retry")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else if isLoading {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(0.8)
+                    }
                 }
-            } else if isLoading {
-                ProgressView()
-                    .tint(.white)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.white.opacity(0.14), lineWidth: 1)
+            )
         }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
-        )
+        .aspectRatio(4.0/5.0, contentMode: .fit) // 4:5 ratio to match edit view crop
         .task {
             await loadImage()
         }
-        .onTapGesture {
-            if loadFailed {
-                Task { await loadImage() }
-            }
+        .onDisappear {
+            // Cancel load task if view disappears before loading completes
+            loadTask?.cancel()
         }
     }
     
     private func loadImage() async {
-        isLoading = true
-        loadFailed = false
+        // Cancel any previous load task
+        loadTask?.cancel()
         
-        do {
-            // Try different target sizes for landscape images
-            let targetSize = CGSize(width: 300, height: 300)
-            let loadedImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize)
+        loadTask = Task {
+            isLoading = true
+            loadFailed = false
             
-            await MainActor.run {
-                if let loadedImage = loadedImage {
+            // Use a reasonable thumbnail size for grid display
+            let targetSize = CGSize(width: 300, height: 300)
+            
+            guard !Task.isCancelled else { return }
+            
+            if let loadedImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize) {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
                     self.image = loadedImage
                     self.isLoading = false
-                } else {
-                    // Try loading without target size constraint
-                    Task {
-                        let fallbackImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: nil)
-                        await MainActor.run {
-                            if let fallbackImage = fallbackImage {
-                                self.image = fallbackImage
-                            } else {
-                                self.loadFailed = true
-                            }
-                            self.isLoading = false
-                        }
-                    }
+                }
+            } else {
+                // If load failed, mark as failed for retry
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.loadFailed = true
+                    self.isLoading = false
                 }
             }
+        }
+    }
+    
+    private func renderTransformedThumbnail(image: UIImage, transform: AlignTransform, size: CGFloat) -> UIImage {
+        // Render the transformed image for the thumbnail to match exactly what's shown in edit view
+        let cropSize = CGSize(width: size * 2, height: size * 2.5) // 4:5 ratio at 2x for quality
+        
+        // Calculate scaled-to-fit size (matching SwiftUI's .scaledToFit())
+        let imageAspect = image.size.width / image.size.height
+        let cropAspect = cropSize.width / cropSize.height
+        
+        var fitSize: CGSize
+        if imageAspect > cropAspect {
+            // Image is wider - constrain by width
+            fitSize = CGSize(width: cropSize.width, height: cropSize.width / imageAspect)
+        } else {
+            // Image is taller - constrain by height
+            fitSize = CGSize(width: cropSize.height * imageAspect, height: cropSize.height)
+        }
+        
+        // The offset was captured at screen resolution (screen width)
+        // We need to scale it to match our render resolution
+        let screenWidth = UIScreen.main.bounds.width
+        let scaleFactor = cropSize.width / screenWidth
+        let scaledOffsetX = transform.offsetX * scaleFactor
+        let scaledOffsetY = transform.offsetY * scaleFactor
+        
+        let renderer = UIGraphicsImageRenderer(size: cropSize)
+        return renderer.image { ctx in
+            // Fill with black (background outside crop)
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: cropSize))
+            
+            // Apply transforms using the same method as the edit view
+            // 1. Translate to center + scaled user offset
+            ctx.cgContext.translateBy(
+                x: cropSize.width/2 + scaledOffsetX,
+                y: cropSize.height/2 + scaledOffsetY
+            )
+            
+            // 2. Apply rotation around the offset center point
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+            
+            // 3. Apply scale (zoom)
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            
+            // 4. Draw the image centered at scaled-to-fit size
+            let drawRect = CGRect(
+                x: -fitSize.width/2,
+                y: -fitSize.height/2,
+                width: fitSize.width,
+                height: fitSize.height
+            )
+            image.draw(in: drawRect)
         }
     }
 }
@@ -581,7 +750,8 @@ struct ImportPhotosView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.cyan)
+                            .font(.body.weight(.semibold))
                     }
                 }
             }
@@ -758,13 +928,27 @@ struct PhotoEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var ctx
 
-    var photo: ProgressPhoto
+    let photo: ProgressPhoto
 
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var rotation: Angle = .zero
     @State private var isSaving = false
+    @State private var showErrorAlert = false
+    @State private var errorMessage = ""
+    @State private var minScale: CGFloat = 1
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var hasCalculatedInitialScale = false
+    
+    // Ghost overlay
+    @State private var ghostImage: UIImage?
+    @State private var showGhost = false
+    @State private var ghostOpacity: Double = 0.5
+    @State private var allPhotosInJourney: [ProgressPhoto] = []
 
     var body: some View {
         NavigationStack {
@@ -773,42 +957,123 @@ struct PhotoEditSheet: View {
 
                 if let img = image {
                     GeometryReader { geo in
+                        let cropW = geo.size.width
+                        let cropH = cropW * 5/4
+                        
                         ZStack {
-                            // Crop "frame" (4:5)
-                            let cropW = geo.size.width
-                            let cropH = geo.size.width * 5/4
-
-                            Rectangle()
-                                .fill(Color.black.opacity(0.45))
-                                .mask(
-                                    Rectangle()
-                                        .frame(width: cropW, height: cropH)
-                                        .position(x: cropW/2, y: geo.size.height/2)
-                                        .allowsHitTesting(false)
-                                )
-                                .ignoresSafeArea()
-
+                            // Full image layer (dimmed, for context)
                             Image(uiImage: img)
                                 .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: cropW, height: cropH)
+                                .scaledToFit()
                                 .scaleEffect(scale)
                                 .offset(offset)
                                 .rotationEffect(rotation)
-                                .clipped()
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .opacity(0.3)
+                                .blur(radius: 3)
+                                .allowsHitTesting(false)
+
+                            // Light overlay everywhere EXCEPT the crop area (matches bottom bar translucency)
+                            Rectangle()
+                                .fill(Color.black.opacity(0.35))
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .mask(
+                                    ZStack {
+                                        Rectangle()
+                                            .fill(Color.white)
+                                        RoundedRectangle(cornerRadius: 18)
+                                            .fill(Color.black)
+                                            .frame(width: cropW, height: cropH)
+                                            .position(x: geo.size.width/2, y: geo.size.height/2)
+                                            .blendMode(.destinationOut)
+                                    }
+                                    .compositingGroup()
                                 )
-                                .position(x: cropW/2, y: geo.size.height/2)
-                                .gesture(
-                                    SimultaneousGesture(
-                                        DragGesture().onChanged { offset = $0.translation },
-                                        MagnificationGesture().onChanged { scale = $0 }
+                                .allowsHitTesting(false)
+
+                            // Bright crop area with main image + ghost overlay on top
+                            ZStack {
+                                // Main image being edited (below) - fade out as ghost opacity increases
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: cropW, height: cropH)
+                                    .overlay(
+                                        Image(uiImage: img)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .scaleEffect(scale)
+                                            .offset(offset)
+                                            .rotationEffect(rotation)
+                                            .opacity(showGhost ? (1 - ghostOpacity) : 1)
                                     )
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    .position(x: cropW/2, y: geo.size.height/2)
+                                
+                                // Ghost overlay (on top, if enabled)
+                                if showGhost, let ghost = ghostImage {
+                                    Rectangle()
+                                        .fill(Color.clear)
+                                        .frame(width: cropW, height: cropH)
+                                        .overlay(
+                                            Image(uiImage: ghost)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .opacity(ghostOpacity)
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                        .position(x: cropW/2, y: geo.size.height/2)
+                                        .allowsHitTesting(false)
+                                }
+                                
+                                // Border and shadow on top of everything
+                                Rectangle()
+                                    .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                                    .frame(width: cropW, height: cropH)
+                                    .position(x: cropW/2, y: geo.size.height/2)
+                                    .allowsHitTesting(false)
+                            }
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .position(x: geo.size.width/2, y: geo.size.height/2)
+                            .gesture(
+                                SimultaneousGesture(
+                                    DragGesture()
+                                        .onChanged { value in
+                                            offset = CGSize(
+                                                width: lastOffset.width + value.translation.width,
+                                                height: lastOffset.height + value.translation.height
+                                            )
+                                        }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        },
+                                    MagnificationGesture()
+                                        .onChanged { value in
+                                            let newScale = lastScale * value
+                                            scale = max(minScale, newScale)
+                                            print("🔍 Zoom: \(scale) (min: \(minScale))")
+                                        }
+                                        .onEnded { _ in
+                                            lastScale = scale
+                                            print("✅ Zoom ended at: \(scale)")
+                                        }
                                 )
-                                .gesture(
-                                    RotationGesture().onChanged { rotation = $0 }
-                                )
+                            )
+                            .gesture(
+                                RotationGesture().onChanged { rotation = $0 }
+                            )
+                        }
+                        .onChange(of: geo.size) { _, newSize in
+                            // Recalculate scale when geometry changes (e.g., rotation)
+                            if hasCalculatedInitialScale {
+                                calculateInitialScale(imageSize: img.size, cropSize: CGSize(width: newSize.width, height: newSize.width * 5/4))
+                            }
+                        }
+                        .task(id: img) {
+                            // Calculate initial scale when image loads or changes
+                            if !hasCalculatedInitialScale {
+                                calculateInitialScale(imageSize: img.size, cropSize: CGSize(width: cropW, height: cropH))
+                                hasCalculatedInitialScale = true
+                            }
                         }
                     }
                 } else {
@@ -817,6 +1082,8 @@ struct PhotoEditSheet: View {
             }
             .navigationTitle("Edit Photo")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.visible, for: .navigationBar, .bottomBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: { dismiss() }) {
@@ -830,54 +1097,258 @@ struct PhotoEditSheet: View {
                     }) {
                         if isSaving {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: "checkmark")
-                                .foregroundColor((image == nil) ? .gray : .blue)
+                                .foregroundColor((image == nil) ? .gray : .cyan)
+                                .font(.body.weight(.semibold))
                         }
                     }
-                    .disabled(isSaving || image == nil)
+                    .disabled(isSaving || image == nil || isDeleting)
                 }
             }
-            .task { await loadImage() }
+            .task { 
+                await loadImage()
+                await loadGhostImage()
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 12) {
+                    // Top row: Ghost Overlay and Delete Photo buttons side by side
+                    HStack(spacing: 16) {
+                        if ghostImage != nil {
+                            Button(action: { showGhost.toggle() }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: showGhost ? "eye.fill" : "eye.slash.fill")
+                                    Text("Ghost Overlay")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .foregroundColor(showGhost ? .cyan : .white.opacity(0.7))
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Button(role: .destructive, action: {
+                            showDeleteConfirmation = true
+                        }) {
+                            HStack(spacing: 6) {
+                                Text("Delete Photo")
+                                Image(systemName: "trash")
+                            }
+                            .foregroundColor(.red)
+                            .font(.subheadline.weight(.medium))
+                        }
+                        .disabled(isDeleting)
+                    }
+                    
+                    // Bottom row: Slider (always reserve space, but hide when ghost is disabled)
+                    HStack {
+                        if showGhost && ghostImage != nil {
+                            Image(systemName: "circle.lefthalf.filled")
+                                .foregroundColor(.white.opacity(0.7))
+                            Slider(value: $ghostOpacity, in: 0...1)
+                                .tint(.cyan)
+                            Text("\(Int(ghostOpacity * 100))%")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                                .frame(width: 40)
+                        }
+                    }
+                    .frame(height: 28) // Fixed height to maintain consistent bottom bar size
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
+            }
+            .alert("Delete Photo", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    Task { await deletePhoto() }
+                }
+            } message: {
+                Text("Are you sure you want to delete this photo? This action cannot be undone.")
+            }
+            .alert("Error", isPresented: $showErrorAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
         }
     }
 
     private func loadImage() async {
         image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: nil)
+        
+        // Apply saved transform if it exists
+        await MainActor.run {
+            let transform = photo.alignTransform
+            if transform.scale != 1 || transform.offsetX != 0 || transform.offsetY != 0 || transform.rotation != 0 {
+                // User has previously edited this photo - restore their edits
+                scale = transform.scale
+                lastScale = transform.scale
+                // Allow zoom out further than saved level (will be constrained by minScale later)
+                offset = CGSize(width: transform.offsetX, height: transform.offsetY)
+                lastOffset = offset
+                rotation = Angle(radians: transform.rotation)
+                hasCalculatedInitialScale = true // Prevent calculateInitialScale from overwriting
+                print("📸 Loaded saved transform: scale=\(transform.scale), offset=(\(transform.offsetX), \(transform.offsetY)), rotation=\(transform.rotation)")
+            }
+        }
+    }
+    
+    private func loadGhostImage() async {
+        // Fetch photos in the same journey
+        let journeyId = photo.journeyId
+        let descriptor = FetchDescriptor<ProgressPhoto>(
+            predicate: #Predicate { $0.journeyId == journeyId },
+            sortBy: [SortDescriptor(\ProgressPhoto.date, order: .forward)]
+        )
+        
+        do {
+            let photosInJourney = try ctx.fetch(descriptor)
+            await MainActor.run {
+                allPhotosInJourney = photosInJourney
+            }
+            
+            // Load the first photo in the journey as ghost overlay
+            guard let firstPhoto = photosInJourney.first, firstPhoto.id != photo.id else {
+                print("👻 No ghost photo available (this is the first photo)")
+                return
+            }
+            
+            print("👻 Loading ghost image from first photo...")
+            let screenSize = UIScreen.main.bounds.size
+            let scale = UIScreen.main.scale
+            let targetSize = CGSize(width: screenSize.width * scale, height: screenSize.width * 5/4 * scale)
+            
+            if let loadedGhost = await PhotoStore.fetchUIImage(localId: firstPhoto.assetLocalId, targetSize: targetSize) {
+                await MainActor.run {
+                    // Apply the ghost's transform if it has one
+                    let ghostTransform = firstPhoto.alignTransform
+                    if ghostTransform.scale != 1 || ghostTransform.offsetX != 0 || ghostTransform.offsetY != 0 || ghostTransform.rotation != 0 {
+                        // Ghost has been edited - need to render it with transform
+                        let renderer = UIGraphicsImageRenderer(size: loadedGhost.size)
+                        let transformedGhost = renderer.image { ctx in
+                            ctx.cgContext.translateBy(x: loadedGhost.size.width/2, y: loadedGhost.size.height/2)
+                            ctx.cgContext.rotate(by: CGFloat(ghostTransform.rotation))
+                            ctx.cgContext.scaleBy(x: ghostTransform.scale, y: ghostTransform.scale)
+                            ctx.cgContext.translateBy(x: ghostTransform.offsetX, y: ghostTransform.offsetY)
+                            
+                            let drawRect = CGRect(
+                                x: -loadedGhost.size.width/2,
+                                y: -loadedGhost.size.height/2,
+                                width: loadedGhost.size.width,
+                                height: loadedGhost.size.height
+                            )
+                            loadedGhost.draw(in: drawRect)
+                        }
+                        self.ghostImage = transformedGhost
+                    } else {
+                        self.ghostImage = loadedGhost
+                    }
+                    print("👻 Ghost image loaded successfully")
+                }
+            } else {
+                print("❌ Failed to load ghost image")
+            }
+        } catch {
+            print("❌ Error fetching photos for ghost: \(error)")
+        }
+    }
+    
+    private func calculateInitialScale(imageSize: CGSize, cropSize: CGSize) {
+        // Image will be .scaledToFit() within the crop area
+        // Then we apply scaleEffect to zoom it to fill
+        
+        let imageAspect = imageSize.width / imageSize.height
+        let cropAspect = cropSize.width / cropSize.height  // 4:5 = 0.8
+        
+        // ScaledToFit will constrain by the limiting dimension
+        // To fill, we need to scale by the ratio of the crop aspect to image aspect
+        let fillScale: CGFloat
+        if imageAspect > cropAspect {
+            // Image is wider than crop - fits by width, needs to scale by height ratio
+            fillScale = imageAspect / cropAspect
+        } else {
+            // Image is taller than crop - fits by height, needs to scale by width ratio
+            fillScale = cropAspect / imageAspect
+        }
+        
+        // Always update minScale to the fill scale
+        minScale = fillScale
+        
+        // Only set initial scale if we haven't loaded a saved transform
+        if !hasCalculatedInitialScale {
+            scale = fillScale
+            lastScale = fillScale
+            print("📐 Scale calc: image=\(imageSize), crop=\(cropSize)")
+            print("📐 Image aspect=\(String(format: "%.2f", imageAspect)), crop aspect=\(String(format: "%.2f", cropAspect))")
+            print("📐 Initial scale: \(String(format: "%.2f", fillScale)) (min: \(String(format: "%.2f", minScale)))")
+        } else {
+            print("📐 Skipping initial scale - using saved transform (scale: \(scale), min: \(minScale))")
+        }
     }
 
     private func saveEdits() async {
-        guard let base = image else { return }
+        guard image != nil else { return }
         isSaving = true
 
-        // Render the transformed crop (4:5)
-        let outSize = CGSize(width: 2000, height: 2500) // good resolution for 4:5
-        let renderer = UIGraphicsImageRenderer(size: outSize)
-        let rendered = renderer.image { ctx in
-            ctx.cgContext.translateBy(x: outSize.width/2, y: outSize.height/2)
-            ctx.cgContext.rotate(by: CGFloat(rotation.radians))
-            ctx.cgContext.scaleBy(x: scale, y: scale)
-            ctx.cgContext.translateBy(x: offset.width, y: offset.height)
-
-            let drawRect = CGRect(
-                x: -base.size.width/2,
-                y: -base.size.height/2,
-                width: base.size.width,
-                height: base.size.height
-            )
-            base.draw(in: drawRect)
+        // Save the transform without creating a new image
+        // This keeps the original image and allows re-editing with full zoom out
+        await MainActor.run {
+            do {
+                photo.alignTransform = AlignTransform(
+                    scale: scale,
+                    offsetX: offset.width,
+                    offsetY: offset.height,
+                    rotation: rotation.radians
+                )
+                
+                try ctx.save()
+                print("✅ Photo transform saved: scale=\(scale), offset=(\(offset.width), \(offset.height)), rotation=\(rotation.radians)")
+                isSaving = false
+                dismiss()
+            } catch {
+                print("❌ Error saving photo transform: \(error)")
+                errorMessage = "Failed to save edits: \(error.localizedDescription)"
+                showErrorAlert = true
+                isSaving = false
+            }
         }
-
-        // Save new asset and relink this ProgressPhoto to it
-        if let newLocalId = try? await PhotoStore.saveToLibrary(rendered) {
-            photo.assetLocalId = newLocalId
-            photo.alignTransform = AlignTransform(scale: 1, offsetX: 0, offsetY: 0, rotation: 0)
-            try? ctx.save()
+    }
+    
+    private func deletePhoto() async {
+        isDeleting = true
+        
+        await MainActor.run {
+            do {
+                // Delete from SwiftData
+                ctx.delete(photo)
+                try ctx.save()
+                print("✅ Photo deleted from database")
+                
+                // Delete the image file from app directory
+                Task {
+                    do {
+                        try await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
+                        print("✅ Photo file deleted from app directory")
+                    } catch {
+                        print("⚠️ Warning: Could not delete photo file: \(error)")
+                    }
+                }
+                
+                isDeleting = false
+                dismiss()
+            } catch {
+                print("❌ Error deleting photo: \(error)")
+                errorMessage = "Failed to delete photo: \(error.localizedDescription)"
+                showErrorAlert = true
+                isDeleting = false
+            }
         }
-        isSaving = false
-        dismiss()
     }
 }
 
