@@ -28,7 +28,7 @@ struct CompareView: View {
                 .pickerStyle(.segmented)
                 .tint(.white)
                 .padding(.horizontal)
-                .padding(.top, 50) // Manual safe area compensation
+                .padding(.top, 80) // Manual safe area compensation - increased spacing
                 
                 // Journey selector
                 Menu {
@@ -259,7 +259,7 @@ struct PhotoSelectorSlider: View {
                                                     Image(systemName: "checkmark.circle.fill")
                                                         .font(.title3)
                                                         .foregroundColor(.cyan)
-                                                        .background(Color.black.opacity(0.6), in: Circle())
+                                                        .background(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8), in: Circle())
                                                         .padding(4)
                                                 }
                                                 Spacer()
@@ -296,7 +296,7 @@ struct PhotoSelectorSlider: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.8))
+                .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .stroke(Color.white.opacity(0.2), lineWidth: 1)
@@ -373,49 +373,76 @@ struct CompareCanvas: View {
                 switch mode {
                 case .parallel:
                     HStack(spacing: 8) {
-                        Image(uiImage: l).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 16))
-                        Image(uiImage: r).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 16))
+                        Image(uiImage: l)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                        
+                        Image(uiImage: r)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
+                    .frame(height: 320) // Reduced height for parallel mode
                 case .slider:
                     GeometryReader { geo in
                         let w = max(1, geo.size.width)
                         let cut = w * sliderX
-
-                        // Left image (base layer - always visible)
-                        Image(uiImage: l)
-                            .resizable()
-                            .scaledToFit()
-                            .clipped()
                         
-                        // Right image (overlay - masked to show only the right portion)
-                        Image(uiImage: r)
-                            .resizable()
-                            .scaledToFit()
-                            .clipped()
-                            .mask(alignment: .leading) {
+                        ZStack(alignment: .leading) {
+                            // Left image (base layer - always visible)
+                            Image(uiImage: l)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: w)
+                                .clipped()
+                            
+                            // Right image (overlay - masked to show only the right portion)
+                            Image(uiImage: r)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: w)
+                                .clipped()
+                                .mask(alignment: .leading) {
+                                    Rectangle()
+                                        .frame(width: w - cut)
+                                        .offset(x: cut)
+                                }
+                            
+                            // Slider handle with line
+                            ZStack {
+                                // Vertical line
                                 Rectangle()
-                                    .frame(width: w - cut)
-                                    .offset(x: cut)
+                                    .fill(.white)
+                                    .frame(width: 3)
+                                    .shadow(color: .black.opacity(0.5), radius: 2)
+                                
+                                // Handle circle
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 44, height: 44)
+                                    .shadow(color: .black.opacity(0.3), radius: 4)
+                                    .overlay(
+                                        Image(systemName: "arrow.left.and.right")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(Color(red: 30/255, green: 32/255, blue: 35/255))
+                                    )
+                                    .position(x: 0, y: geo.size.height / 2)
                             }
-
-                        // Slider line
-                        Rectangle()
-                            .fill(.white)
                             .frame(width: 3)
-                            .shadow(color: .black.opacity(0.3), radius: 1, x: 1, y: 0)
-                            .position(x: cut, y: geo.size.height/2)
-                        
-                        // Invisible overlay for gesture handling
-                        Rectangle()
-                            .fill(Color.clear)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { v in
-                                        let x = min(max(v.location.x, 0), geo.size.width)
-                                        sliderX = x / max(1, geo.size.width)
-                                    }
-                            )
+                            .offset(x: cut - 1.5) // Center the line on the cut position
+                        }
+                        .frame(width: w, height: geo.size.height)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { v in
+                                    let x = min(max(v.location.x, 0), w)
+                                    sliderX = x / w
+                                }
+                        )
                     }
                     .frame(height: 420)
                     .clipShape(RoundedRectangle(cornerRadius: 16))

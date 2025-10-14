@@ -9,6 +9,7 @@ struct BulkMeasurementSheet: View {
     
     @State private var date: Date = .now
     @State private var unit: MeasureUnit = .cm
+    @State private var userProfile = UserProfile.load()
     
     // All measurement values as optional strings
     @State private var chest: String = ""
@@ -30,14 +31,16 @@ struct BulkMeasurementSheet: View {
                 Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
                 
                 Form {
-                    Section("Date & Unit") {
+                    Section("Date") {
                         DatePicker("When", selection: $date, displayedComponents: [.date, .hourAndMinute])
                         
-                        Picker("Unit", selection: $unit) {
-                            Text("CM").tag(MeasureUnit.cm)
-                            Text("IN").tag(MeasureUnit.inch)
+                        HStack {
+                            Text("Unit")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(unit.rawValue.uppercased())
+                                .foregroundColor(.white)
                         }
-                        .pickerStyle(.segmented)
                     }
                     
                     Section("Torso") {
@@ -80,6 +83,9 @@ struct BulkMeasurementSheet: View {
                     .disabled(!hasAnyValue)
                 }
             }
+        }
+        .onAppear {
+            unit = userProfile.preferredUnit ?? .cm
         }
     }
     

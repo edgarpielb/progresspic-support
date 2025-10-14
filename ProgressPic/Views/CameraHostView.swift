@@ -26,64 +26,13 @@ struct CameraHostView: View {
     @State private var photos: [ProgressPhoto] = []
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
+    @State private var gridEnabled = false
 
     init(journey: Journey? = nil) {
         self._selectedJourney = State(initialValue: journey)
     }
     
     // MARK: - Computed Views
-    
-    private var journeySelector: some View {
-        HStack {
-            // Journey selector dropdown
-            Menu {
-                ForEach(journeys) { journey in
-                    Button(journey.name) {
-                        selectedJourney = journey
-                    }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder")
-                    Text(selectedJourney?.name ?? "Select Journey")
-                    Image(systemName: "chevron.down")
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.4).background(.ultraThinMaterial))
-                .cornerRadius(20)
-            }
-            
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-    }
-    
-    private var zoomButtons: some View {
-        HStack(spacing: 30) {
-            // Zoom out button (-)
-            Button(action: {
-                camera.zoomOut()
-            }) {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 36))
-                    .foregroundColor(camera.currentZoom <= 1.0 ? .gray.opacity(0.5) : .white)
-            }
-            .disabled(camera.currentZoom <= 1.0)
-            
-            // Zoom in button (+)
-            Button(action: {
-                camera.zoomIn()
-            }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 36))
-                    .foregroundColor(camera.currentZoom >= camera.maxZoom ? .gray.opacity(0.5) : .white)
-            }
-            .disabled(camera.currentZoom >= camera.maxZoom)
-        }
-    }
     
     private var cameraPreviewSection: some View {
         GeometryReader { geometry in
@@ -119,6 +68,12 @@ struct CameraHostView: View {
                         .allowsHitTesting(false)
                 }
                 
+                // Grid overlay
+                if gridEnabled {
+                    GridOverlay()
+                        .frame(width: cropW, height: cropH)
+                }
+                
                 // Timer countdown overlay
                 if timerActive && countdownSeconds > 0 {
                     Text("\(countdownSeconds)")
@@ -142,7 +97,7 @@ struct CameraHostView: View {
                             timerControlsView
                         }
                     }
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 220)
                 }
                 .frame(width: cropW, height: cropH)
             }
@@ -177,7 +132,7 @@ struct CameraHostView: View {
                 .cornerRadius(10)
             }
             .frame(width: cropW, height: cropH)
-            .background(Color.black.opacity(0.8))
+            .background(AppStyle.Colors.bgDark.opacity(0.8))
         }
     }
 
@@ -189,34 +144,149 @@ struct CameraHostView: View {
             
             // Overlaid UI elements
             VStack(spacing: 0) {
-                // Top section with journey selector
-                HStack {
-                    journeySelector
+                // Top bar with journey selector (no time)
+                HStack(spacing: AppStyle.Spacing.md) {
+                    // Journey selector dropdown
+                    Menu {
+                        ForEach(journeys) { journey in
+                            Button(journey.name) {
+                                selectedJourney = journey
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .font(.system(size: AppStyle.IconSize.md))
+                            Text(selectedJourney?.name ?? "Select Journey")
+                                .font(AppStyle.FontStyle.caption)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: AppStyle.IconSize.sm))
+                        }
+                        .foregroundColor(AppStyle.Colors.textPrimary)
+                        .padding(.horizontal, AppStyle.Spacing.md)
+                        .padding(.vertical, AppStyle.Spacing.sm)
+                        .background(AppStyle.Colors.panelOverlay)
+                        .cornerRadius(AppStyle.Corner.md)
+                    }
+                    
                     Spacer()
                 }
+                .padding(.horizontal, AppStyle.Spacing.lg)
+                .padding(.top, AppStyle.Spacing.lg)
                 
                 Spacer()
+            }
+            
+            // Right-side vertical tool icons at bottom (inside preview)
+            HStack {
+                Spacer()
                 
-                // Bottom rounded control section
-                VStack(spacing: 0) {
-                    // Zoom controls
-                    zoomButtons
-                        .padding(.top, 20)
-                        .padding(.bottom, 16)
+                VStack(spacing: AppStyle.Spacing.md) {
+                    Spacer()
                     
-                    // Main camera controls
-                    cameraControls
-                        .padding(.bottom, 100) // Space for tab bar
+                    // Flash toggle
+                    Button(action: { camera.cycleFlashMode() }) {
+                        Image(systemName: camera.flashMode == .on ? "bolt.fill" : (camera.flashMode == .auto ? "bolt.badge.automatic" : "bolt.slash"))
+                            .font(.system(size: AppStyle.IconSize.xl))
+                            .foregroundColor(camera.flashMode == .off ? AppStyle.Colors.textPrimary : .yellow)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                    }
+                    
+                    // Camera flip
+                    Button(action: { camera.flip() }) {
+                        Image(systemName: "arrow.triangle.2.circlepath.camera")
+                            .font(.system(size: AppStyle.IconSize.xl))
+                            .foregroundColor(AppStyle.Colors.textPrimary)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                    }
+                    
+                    // Timer
+                    Button(action: {
+                        showTimerControls.toggle()
+                        if showTimerControls { showGhostControls = false }
+                    }) {
+                        Image(systemName: timerActive ? "timer.circle.fill" : "timer")
+                            .font(.system(size: AppStyle.IconSize.xl))
+                            .foregroundColor(timerActive ? .orange : AppStyle.Colors.textPrimary)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                    }
+                    
+                    // Grid toggle
+                    Button(action: { gridEnabled.toggle() }) {
+                        Image(systemName: gridEnabled ? "grid.circle.fill" : "grid")
+                            .font(.system(size: AppStyle.IconSize.xl))
+                            .foregroundColor(gridEnabled ? .white : AppStyle.Colors.textPrimary)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                    }
+                    
+                    // Ghost overlay
+                    Button(action: { toggleGhostMode() }) {
+                        Image(systemName: ghostEnabled ? "eye.fill" : "eye")
+                            .font(.system(size: AppStyle.IconSize.xl))
+                            .foregroundColor(ghostEnabled ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                    }
                 }
-                .background(
-                    Color.black.opacity(0.4)
-                        .background(.ultraThinMaterial)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .padding(.horizontal, 0)
+                .padding(.trailing, AppStyle.Spacing.lg)
+                .padding(.bottom, 120) // Position above shutter button
+            }
+            
+            // Bottom center controls - shutter button and thumbnail (above tab bar)
+            VStack {
+                Spacer()
+                
+                HStack(spacing: AppStyle.Spacing.xxxl) {
+                    // Left: Thumbnail preview
+                    if let thumbnail = latestPhotoThumbnail {
+                        Button(action: { showPhotoLibrary = true }) {
+                            Image(uiImage: thumbnail)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 60, height: 60)
+                                .clipShape(RoundedRectangle(cornerRadius: AppStyle.Corner.md))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: AppStyle.Corner.md)
+                                        .stroke(AppStyle.Colors.textPrimary, lineWidth: 2)
+                                )
+                        }
+                    } else {
+                        // Placeholder
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(width: 60, height: 60)
+                    }
+                    
+                    // Center: Large shutter button
+                    Button {
+                        if timerSeconds > 0 {
+                            startTimerCapture()
+                        } else {
+                            capturePhoto()
+                        }
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.5), lineWidth: 4)
+                                .frame(width: AppStyle.ButtonSize.shutter, height: AppStyle.ButtonSize.shutter)
+                            
+                            Circle()
+                                .fill(AppStyle.Colors.textPrimary)
+                                .frame(width: 70, height: 70)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!camera.canCapture)
+                    .opacity(camera.canCapture ? 1 : 0.6)
+                    
+                    // Right: Additional controls (placeholder for symmetry)
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(width: 60, height: 60)
+                }
+                .padding(.bottom, 30) // Right above tab bar
             }
         }
-        .background(Color.black)
+        .background(AppStyle.Colors.bgDark)
         .onAppear {
             print("👁️ CameraHostView appeared")
             
@@ -380,103 +450,6 @@ struct CameraHostView: View {
         }
     }
 
-    var cameraControls: some View {
-        HStack(spacing: 0) {
-            // Camera flip button
-            Button { camera.flip() } label: {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: "arrow.triangle.2.circlepath.camera")
-                        .font(.system(size: 24))
-                        .foregroundColor(.white)
-                }
-            }
-            
-            Spacer()
-            
-            // Ghost button
-            Button(action: {
-                toggleGhostMode()
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: ghostEnabled ? "eye.fill" : "eye")
-                        .foregroundColor(ghostEnabled ? .cyan : .white)
-                        .font(.system(size: 24))
-                }
-            }
-            
-            Spacer()
-            
-            // Center: Large capture button
-            Button {
-                if timerSeconds > 0 {
-                    startTimerCapture()
-                } else {
-                    capturePhoto()
-                }
-            } label: {
-                ZStack {
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.5), lineWidth: 4)
-                        .frame(width: 84, height: 84)
-                    
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 70, height: 70)
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(!camera.canCapture)
-            .opacity(camera.canCapture ? 1 : 0.6)
-            
-            Spacer()
-            
-            // Timer button
-            Button(action: {
-                showTimerControls.toggle()
-                if showTimerControls {
-                    showGhostControls = false
-                }
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: timerActive ? "timer.circle.fill" : "timer")
-                        .foregroundColor(timerActive ? .orange : .white)
-                        .font(.system(size: 24))
-                }
-            }
-            
-            Spacer()
-            
-            // Flash button
-            Button(action: {
-                camera.cycleFlashMode()
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: camera.flashMode == .on ? "bolt.fill" : (camera.flashMode == .auto ? "bolt.badge.automatic" : "bolt.slash"))
-                        .foregroundColor(camera.flashMode == .off ? .white : .yellow)
-                        .font(.system(size: 24))
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-    }
-
-
     /// Fetch photos for the currently selected journey using a scoped query
     /// This is more efficient than fetching all photos and filtering in memory
     func fetchPhotosForSelectedJourney() {
@@ -599,46 +572,56 @@ struct CameraHostView: View {
     }
     
     var timerControlsView: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AppStyle.Spacing.sm) {
             ForEach([0,3,5,10], id: \.self) { sec in
                 Button {
                     timerSeconds = sec
                     showTimerControls = false
                 } label: {
                     Text(sec == 0 ? "Off" : "\(sec)s")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .font(AppStyle.FontStyle.captionBold)
+                        .foregroundColor(AppStyle.Colors.textPrimary)
+                        .padding(.horizontal, AppStyle.Spacing.sm)
+                        .padding(.vertical, AppStyle.Spacing.sm)
                         .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(sec == timerSeconds ? Color.white.opacity(0.12) : Color.white.opacity(0.06))
+                            RoundedRectangle(cornerRadius: AppStyle.Corner.md)
+                                .fill(sec == timerSeconds ? Color.white.opacity(0.15) : Color.white.opacity(0.04))
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(sec == timerSeconds ? Color.white.opacity(0.35) : Color.white.opacity(0.15), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: AppStyle.Corner.md)
+                                .stroke(sec == timerSeconds ? Color.white.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 1)
                         )
                 }
                 .buttonStyle(.plain)
             }
         }
-        .background(.ultraThinMaterial, in: Capsule())
+        .padding(AppStyle.Spacing.sm)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.5))
+        )
     }
     
     var ghostControlsView: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: AppStyle.Spacing.md) {
             // Ghost opacity slider
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "eye.slash")
-                    .foregroundColor(.white)
+                    .font(.system(size: 14))
+                    .foregroundColor(AppStyle.Colors.textPrimary)
                 Slider(value: $ghostOpacity, in: 0...1)
-                    .frame(width: 120)
-                    .accentColor(.cyan)
+                    .frame(width: 80)
+                    .accentColor(AppStyle.Colors.accentCyan)
                 Image(systemName: "eye.fill")
-                    .foregroundColor(.white)
+                    .font(.system(size: 14))
+                    .foregroundColor(AppStyle.Colors.textPrimary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            .cornerRadius(20)
+            .padding(.horizontal, AppStyle.Spacing.md)
+            .padding(.vertical, AppStyle.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                    .fill(Color.black.opacity(0.5))
+            )
             
             // First/Last toggle
             Button(action: {
@@ -647,14 +630,17 @@ struct CameraHostView: View {
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: useFirst ? "1.circle.fill" : "arrow.clockwise")
+                        .font(.system(size: 14))
                     Text(useFirst ? "First" : "Last")
-                        .font(.caption.bold())
+                        .font(AppStyle.FontStyle.captionBold)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial)
-                .cornerRadius(16)
+                .foregroundColor(AppStyle.Colors.textPrimary)
+                .padding(.horizontal, AppStyle.Spacing.md)
+                .padding(.vertical, AppStyle.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
+                        .fill(Color.black.opacity(0.5))
+                )
             }
         }
     }
@@ -754,7 +740,33 @@ struct CameraPreviewLayerView: UIViewRepresentable {
     }
 }
 
-// subtle “eyes/nose” crosshair + grid
+// Grid overlay for camera view
+struct GridOverlay: View {
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            Path { p in
+                // Vertical lines
+                for i in 1..<3 {
+                    let x = w * CGFloat(i) / 3
+                    p.move(to: .init(x: x, y: 0))
+                    p.addLine(to: .init(x: x, y: h))
+                }
+                // Horizontal lines
+                for i in 1..<3 {
+                    let y = h * CGFloat(i) / 3
+                    p.move(to: .init(x: 0, y: y))
+                    p.addLine(to: .init(x: w, y: y))
+                }
+            }
+            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// subtle "eyes/nose" crosshair + grid
 struct GuidelinesOverlay: View {
     var body: some View {
         GeometryReader { geo in

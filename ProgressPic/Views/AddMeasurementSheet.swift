@@ -11,6 +11,7 @@ struct AddMeasurementSheet: View {
     @State private var date: Date = .now
     @State private var unit: MeasureUnit = .cm
     @State private var valueString: String = ""
+    @State private var userProfile = UserProfile.load()
 
     var body: some View {
         NavigationStack {
@@ -32,11 +33,9 @@ struct AddMeasurementSheet: View {
                     HStack {
                         TextField("0.0", text: $valueString)
                             .keyboardType(.decimalPad)
-                        Picker("", selection: $unit) {
-                            ForEach(units(for: measurementType)) { u in Text(u.rawValue.uppercased()).tag(u) }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
+                        Text(unit.rawValue.uppercased())
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 8)
                     }
                 }
 
@@ -77,7 +76,14 @@ struct AddMeasurementSheet: View {
                 }
             }
         }
-        .onAppear { unit = defaultUnit(for: measurementType) }
+        .onAppear { 
+            // Use user's preferred unit if available, otherwise default
+            if let preferredUnit = userProfile.preferredUnit, units(for: measurementType).contains(preferredUnit) {
+                unit = preferredUnit
+            } else {
+                unit = defaultUnit(for: measurementType)
+            }
+        }
     }
 
     // Units per type

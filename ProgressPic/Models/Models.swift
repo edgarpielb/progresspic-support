@@ -65,16 +65,20 @@ final class ProgressPhoto {
     var assetLocalId: String = ""   // PHAsset localIdentifier
     var isFrontCamera: Bool = true
     var alignTransform: AlignTransform = AlignTransform.identity  // saved transform
+    var notes: String? = nil  // User notes attached to photo
+    var isHidden: Bool = false  // Hide from Watch/Compare
     
     var journey: Journey? = nil
 
-    init(journeyId: UUID, date: Date, assetLocalId: String, isFrontCamera: Bool, alignTransform: AlignTransform = .identity) {
+    init(journeyId: UUID, date: Date, assetLocalId: String, isFrontCamera: Bool, alignTransform: AlignTransform = .identity, notes: String? = nil, isHidden: Bool = false) {
         self.id = UUID()
         self.journeyId = journeyId
         self.date = date
         self.assetLocalId = assetLocalId
         self.isFrontCamera = isFrontCamera
         self.alignTransform = alignTransform
+        self.notes = notes
+        self.isHidden = isHidden
     }
 }
 
@@ -178,7 +182,7 @@ enum MeasurementType: String, CaseIterable, Identifiable {
     }
 }
 
-enum MeasureUnit: String, CaseIterable, Identifiable {
+enum MeasureUnit: String, CaseIterable, Identifiable, Codable {
     case kg, lb, cm, inch, percent
     var id: String { rawValue }
 }
@@ -198,11 +202,11 @@ struct UserProfile: Codable {
     var birthDate: Date?
     var heightCm: Double?
     var gender: Gender?
+    var preferredUnit: MeasureUnit?
     
     enum Gender: String, Codable, CaseIterable {
         case male = "Male"
         case female = "Female"
-        case other = "Other"
     }
     
     var age: Int? {

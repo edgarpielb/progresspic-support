@@ -30,6 +30,9 @@ struct ContentView: View {
         }
         .background(Color(red: 30/255, green: 32/255, blue: 35/255))
         .accentColor(.white)
+        .toolbarBackground(Color(red: 30/255, green: 32/255, blue: 35/255), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarColorScheme(.dark, for: .tabBar)
         .onAppear {
             // Fix any existing photos that don't have journey relationships set
             Task {

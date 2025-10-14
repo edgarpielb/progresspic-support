@@ -3,7 +3,6 @@ import SwiftData
 
 @main
 struct ProgressPicApp: App {
-    @StateObject private var themeManager = ThemeManager()
     let container: ModelContainer
 
     init() {
@@ -41,7 +40,6 @@ struct ProgressPicApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(themeManager)
                 .preferredColorScheme(.dark)     // Force dark everywhere
                 .tint(.white)                    // Make all toggles/segmented/buttons white instead of blue
                 .modelContainer(container)

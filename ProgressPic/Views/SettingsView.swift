@@ -10,21 +10,21 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("About")
                             .font(.headline)
-                            .foregroundColor(ThemeColors.primaryText())
+                            .foregroundColor(AppStyle.Colors.textPrimary)
                         
                         Text("ProgressPic")
                             .font(.title2.bold())
-                            .foregroundColor(ThemeColors.primaryText())
+                            .foregroundColor(AppStyle.Colors.textPrimary)
                         
                         Text("Version 1.0")
                             .font(.body)
-                            .foregroundColor(ThemeColors.secondaryText())
+                            .foregroundColor(AppStyle.Colors.textSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(ThemeColors.cardBackground())
+                            .fill(AppStyle.Colors.panel)
                     )
                 }
                 .padding(.horizontal, 20)
@@ -32,7 +32,7 @@ struct SettingsView: View {
             .padding(.top, 20)
             .padding(.bottom, 120)
         }
-        .background(ThemeColors.backgroundColor())
+        .background(AppStyle.Colors.bgDark)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
     }

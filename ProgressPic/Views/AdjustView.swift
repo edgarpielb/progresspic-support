@@ -67,7 +67,13 @@ struct AdjustView: View {
                     .padding(.horizontal)
                     .padding(.bottom, 14)
                 }
-                .background(.ultraThinMaterial)
+                .background(
+                    ZStack {
+                        Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                    }
+                )
             }
         }
     }

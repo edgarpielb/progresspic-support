@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import Photos
+import AVFoundation
 
 private let accent = Color(red: 0.24, green: 0.85, blue: 0.80)
 
@@ -61,20 +62,15 @@ struct JourneysView: View {
                 .padding(.vertical, 16)
                 .padding(.bottom, 120) // space for tab bar
             }
-            .background(ThemeColors.backgroundColor())
+            .background(AppStyle.Colors.bgDark)
             .navigationTitle("Journeys")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        SettingsView()
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.title3)
-                            .foregroundColor(.white)
-                    }
+                ToolbarItem(placement: .principal) {
+                    Text("Journeys")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
                 }
-                
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: {
                         showNew = true
@@ -368,7 +364,7 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $selectedPhotoForEdit) { photo in
-            PhotoEditSheet(photo: photo)
+            PhotoEditSheet(photo: photo, allPhotos: photos)
         }
         .sheet(isPresented: $showJourneySettings) {
             JourneySettingsView(journey: journey, onJourneyDeleted: { journeyWasDeleted in
@@ -527,7 +523,7 @@ struct PhotoGridItem: View {
             )
         }
         .aspectRatio(4.0/5.0, contentMode: .fit) // 4:5 ratio to match edit view crop
-        .task {
+        .task(id: photo.id) {
             await loadImage()
         }
         .onDisappear {
@@ -567,55 +563,47 @@ struct PhotoGridItem: View {
     }
     
     private func renderTransformedThumbnail(image: UIImage, transform: AlignTransform, size: CGFloat) -> UIImage {
-        // Render the transformed image for the thumbnail to match exactly what's shown in edit view
-        let cropSize = CGSize(width: size * 2, height: size * 2.5) // 4:5 ratio at 2x for quality
+        // Render the final 4:5 cropped thumbnail with transform applied
+        // Use consistent logic with PhotoEditSheet
+        let targetWidth = size * UIScreen.main.scale * 2 // 2x for retina quality
+        let targetHeight = targetWidth * 5.0 / 4.0 // 4:5 ratio
+        let targetSize = CGSize(width: targetWidth, height: targetHeight)
         
-        // Calculate scaled-to-fit size (matching SwiftUI's .scaledToFit())
-        let imageAspect = image.size.width / image.size.height
-        let cropAspect = cropSize.width / cropSize.height
-        
-        var fitSize: CGSize
-        if imageAspect > cropAspect {
-            // Image is wider - constrain by width
-            fitSize = CGSize(width: cropSize.width, height: cropSize.width / imageAspect)
-        } else {
-            // Image is taller - constrain by height
-            fitSize = CGSize(width: cropSize.height * imageAspect, height: cropSize.height)
-        }
-        
-        // The offset was captured at screen resolution (screen width)
-        // We need to scale it to match our render resolution
-        let screenWidth = UIScreen.main.bounds.width
-        let scaleFactor = cropSize.width / screenWidth
-        let scaledOffsetX = transform.offsetX * scaleFactor
-        let scaledOffsetY = transform.offsetY * scaleFactor
-        
-        let renderer = UIGraphicsImageRenderer(size: cropSize)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
         return renderer.image { ctx in
-            // Fill with black (background outside crop)
-            UIColor.black.setFill()
-            ctx.fill(CGRect(origin: .zero, size: cropSize))
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
             
-            // Apply transforms using the same method as the edit view
-            // 1. Translate to center + scaled user offset
-            ctx.cgContext.translateBy(
-                x: cropSize.width/2 + scaledOffsetX,
-                y: cropSize.height/2 + scaledOffsetY
-            )
+            // Move to center of crop area
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
             
-            // 2. Apply rotation around the offset center point
+            // Apply user's transform
             ctx.cgContext.rotate(by: CGFloat(transform.rotation))
-            
-            // 3. Apply scale (zoom)
             ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
             
-            // 4. Draw the image centered at scaled-to-fit size
+            // Calculate how the image fits (scaledToFit logic)
+            let imageAspect = image.size.width / image.size.height
+            let cropAspect = targetSize.width / targetSize.height
+            
+            var drawSize: CGSize
+            if imageAspect > cropAspect {
+                // Image is wider - fit by width
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                // Image is taller - fit by height
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+            
+            // Draw centered
             let drawRect = CGRect(
-                x: -fitSize.width/2,
-                y: -fitSize.height/2,
-                width: fitSize.width,
-                height: fitSize.height
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
             )
+            
             image.draw(in: drawRect)
         }
     }
@@ -739,7 +727,13 @@ struct ImportPhotosView: View {
                                 .foregroundColor(.white)
                         }
                         .padding()
-                        .background(.ultraThinMaterial)
+                        .background(
+                            ZStack {
+                                Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
+                                Rectangle()
+                                    .fill(.ultraThinMaterial)
+                            }
+                        )
                         .cornerRadius(12)
                     }
                 }
@@ -924,7 +918,430 @@ struct ImagePicker: UIViewControllerRepresentable {
 }
 
 // MARK: - Photo Edit Sheet
+// MARK: - Photo Edit Sheet (Read-only view with action bar)
 struct PhotoEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var ctx
+    
+    let photo: ProgressPhoto
+    let allPhotos: [ProgressPhoto]  // For navigation
+    
+    @State private var currentPhoto: ProgressPhoto
+    @State private var image: UIImage?
+    @State private var showNotesEditor = false
+    @State private var showDatePicker = false
+    @State private var showAdjustView = false
+    @State private var showDeleteConfirmation = false
+    @State private var notesText: String = ""
+    @State private var selectedDate: Date = Date()
+    
+    init(photo: ProgressPhoto, allPhotos: [ProgressPhoto] = []) {
+        self.photo = photo
+        self.allPhotos = allPhotos.isEmpty ? [photo] : allPhotos
+        _currentPhoto = State(initialValue: photo)
+    }
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppStyle.Colors.bgDark.ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Header
+                    VStack(spacing: 4) {
+                        Text(currentPhoto.journey?.name ?? "Photo")
+                            .font(AppStyle.FontStyle.headline)
+                            .foregroundColor(AppStyle.Colors.textPrimary)
+                        
+                        Text(currentPhoto.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(AppStyle.FontStyle.caption)
+                            .foregroundColor(AppStyle.Colors.textSecondary)
+                    }
+                    .padding(.top, AppStyle.Spacing.md)
+                    
+                    // Main image with 4:5 aspect ratio (already cropped to 4:5)
+                    if let img = image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, AppStyle.Spacing.md)
+                    } else {
+                        ProgressView()
+                            .tint(AppStyle.Colors.textPrimary)
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(4/5, contentMode: .fit)
+                    }
+                    
+                    Spacer(minLength: AppStyle.Spacing.lg)
+                    
+                    // Navigation controls (if multiple photos)
+                    if allPhotos.count > 1 {
+                        HStack(spacing: AppStyle.Spacing.xxxl) {
+                            Button(action: previousPhoto) {
+                                Image(systemName: "arrow.left")
+                                    .font(.title2)
+                                    .foregroundColor(canGoPrevious ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                                    .frame(width: 60, height: 60)
+                                    .background(AppStyle.Colors.panel)
+                                    .clipShape(Circle())
+                            }
+                            .disabled(!canGoPrevious)
+                            
+                            Button(action: nextPhoto) {
+                                Image(systemName: "arrow.right")
+                                    .font(.title2)
+                                    .foregroundColor(canGoNext ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                                    .frame(width: 60, height: 60)
+                                    .background(AppStyle.Colors.panel)
+                                    .clipShape(Circle())
+                            }
+                            .disabled(!canGoNext)
+                        }
+                        .padding(.bottom, AppStyle.Spacing.md)
+                        
+                        // Dots indicator
+                        HStack(spacing: 8) {
+                            ForEach(0..<min(allPhotos.count, 10), id: \.self) { index in
+                                Circle()
+                                    .fill(currentPhotoIndex == index ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                                    .frame(width: 8, height: 8)
+                            }
+                        }
+                        .padding(.bottom, AppStyle.Spacing.lg)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppStyle.Colors.bgDark, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .foregroundColor(AppStyle.Colors.textPrimary)
+                    }
+                }
+                
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let img = image {
+                        ShareLink(item: Image(uiImage: img), preview: SharePreview("Photo", image: Image(uiImage: img))) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3)
+                                .foregroundColor(AppStyle.Colors.textPrimary)
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                actionBar
+            }
+            .task(id: currentPhoto.id) {
+                await loadImage()
+                notesText = currentPhoto.notes ?? ""
+                selectedDate = currentPhoto.date
+            }
+            .onChange(of: showAdjustView) { _, isShowing in
+                // Reload image when adjust sheet is dismissed to show updated transform
+                if !isShowing {
+                    Task {
+                        await loadImage()
+                    }
+                }
+            }
+            .sheet(isPresented: $showNotesEditor) {
+                notesEditorSheet
+            }
+            .sheet(isPresented: $showDatePicker) {
+                datePickerSheet
+            }
+            .sheet(isPresented: $showAdjustView) {
+                PhotoAdjustSheet(photo: currentPhoto)
+            }
+            .alert("Delete Photo", isPresented: $showDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    deletePhoto()
+                }
+            } message: {
+                Text("Are you sure you want to delete this photo? This action cannot be undone.")
+            }
+        }
+    }
+    
+    // MARK: - Action Bar
+    private var actionBar: some View {
+        HStack(spacing: 0) {
+            // Notes
+            Button(action: { showNotesEditor = true }) {
+                VStack(spacing: 6) {
+                    Image(systemName: currentPhoto.notes != nil ? "note.text.badge.plus" : "note.text")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                    Text("Notes")
+                        .font(AppStyle.FontStyle.caption)
+                }
+                .foregroundColor(currentPhoto.notes != nil ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                .frame(maxWidth: .infinity)
+            }
+            .accessibilityLabel(currentPhoto.notes != nil ? "Edit notes" : "Add notes")
+            .accessibilityHint("Add or edit notes for this photo")
+            
+            // Date
+            Button(action: { showDatePicker = true }) {
+                VStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                    Text("Date")
+                        .font(AppStyle.FontStyle.caption)
+                }
+                .foregroundColor(AppStyle.Colors.textPrimary)
+                .frame(maxWidth: .infinity)
+            }
+            .accessibilityLabel("Change date")
+            .accessibilityHint("Taken on \(currentPhoto.date.formatted(date: .abbreviated, time: .shortened))")
+            
+            // Adjust
+            Button(action: { showAdjustView = true }) {
+                VStack(spacing: 6) {
+                    Image(systemName: "crop.rotate")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                    Text("Adjust")
+                        .font(AppStyle.FontStyle.caption)
+                }
+                .foregroundColor(AppStyle.Colors.textPrimary)
+                .frame(maxWidth: .infinity)
+            }
+            .accessibilityLabel("Adjust photo")
+            .accessibilityHint("Crop, rotate, and align this photo")
+            
+            // Delete
+            Button(action: { showDeleteConfirmation = true }) {
+                VStack(spacing: 6) {
+                    Image(systemName: "trash")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                    Text("Delete")
+                        .font(AppStyle.FontStyle.caption)
+                }
+                .foregroundColor(AppStyle.Colors.accentRed)
+                .frame(maxWidth: .infinity)
+            }
+            .accessibilityLabel("Delete photo")
+            .accessibilityHint("Permanently delete this photo")
+        }
+        .padding(.vertical, AppStyle.Spacing.lg)
+        .padding(.horizontal, AppStyle.Spacing.sm)
+        .background(
+            ZStack {
+                Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.95)
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+            }
+            .ignoresSafeArea(edges: .bottom)
+        )
+    }
+    
+    // MARK: - Notes Editor Sheet
+    private var notesEditorSheet: some View {
+        NavigationStack {
+            ZStack(alignment: .topLeading) {
+                AppStyle.Colors.bgDark.ignoresSafeArea()
+                
+                TextEditor(text: $notesText)
+                    .font(AppStyle.FontStyle.body)
+                    .foregroundColor(AppStyle.Colors.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding()
+                
+                // Placeholder
+                if notesText.isEmpty {
+                    Text("Add notes about this photo...")
+                        .font(AppStyle.FontStyle.body)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 24)
+                        .allowsHitTesting(false)
+                }
+            }
+            .navigationTitle("Notes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppStyle.Colors.bgDark, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showNotesEditor = false
+                        notesText = currentPhoto.notes ?? ""
+                    }
+                }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveNotes()
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Date Picker Sheet
+    private var datePickerSheet: some View {
+        NavigationStack {
+            ZStack {
+                AppStyle.Colors.bgDark.ignoresSafeArea()
+                
+                VStack(spacing: AppStyle.Spacing.xl) {
+                    DatePicker("Date & Time", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
+                        .datePickerStyle(.graphical)
+                        .tint(AppStyle.Colors.accentCyan)
+                        .padding()
+                }
+            }
+            .navigationTitle("Change Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppStyle.Colors.bgDark, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showDatePicker = false
+                        selectedDate = currentPhoto.date
+                    }
+                }
+                
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveDate()
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Helper Properties
+    private var currentPhotoIndex: Int {
+        allPhotos.firstIndex(where: { $0.id == currentPhoto.id }) ?? 0
+    }
+    
+    private var canGoPrevious: Bool {
+        currentPhotoIndex > 0
+    }
+    
+    private var canGoNext: Bool {
+        currentPhotoIndex < allPhotos.count - 1
+    }
+    
+    // MARK: - Actions
+    private func loadImage() async {
+        // Load image and render the 4:5 cropped version with transform applied
+        guard let baseImage = await PhotoStore.fetchUIImage(localId: currentPhoto.assetLocalId, targetSize: nil) else {
+            return
+        }
+        
+        // Render the final cropped 4:5 image as the user sees it in adjust view
+        let croppedImage = renderCroppedImage(from: baseImage, transform: currentPhoto.alignTransform)
+        
+        await MainActor.run {
+            image = croppedImage
+        }
+    }
+    
+    /// Renders the final 4:5 cropped image with the transform applied
+    private func renderCroppedImage(from sourceImage: UIImage, transform: AlignTransform) -> UIImage {
+        // Calculate target size maintaining 4:5 aspect ratio
+        // Use source image width and calculate height
+        let targetWidth = sourceImage.size.width
+        let targetHeight = targetWidth * 5.0 / 4.0 // 4:5 ratio
+        let targetSize = CGSize(width: targetWidth, height: targetHeight)
+        
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+            
+            // Move to center of crop area
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+            
+            // Apply user's transform
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
+            
+            // Calculate how the image fits (scaledToFit logic)
+            let imageAspect = sourceImage.size.width / sourceImage.size.height
+            let cropAspect = targetSize.width / targetSize.height
+            
+            var drawSize: CGSize
+            if imageAspect > cropAspect {
+                // Image is wider - fit by width
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                // Image is taller - fit by height
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+            
+            // Draw centered
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            
+            sourceImage.draw(in: drawRect)
+        }
+    }
+    
+    private func previousPhoto() {
+        guard canGoPrevious else { return }
+        currentPhoto = allPhotos[currentPhotoIndex - 1]
+        image = nil
+    }
+    
+    private func nextPhoto() {
+        guard canGoNext else { return }
+        currentPhoto = allPhotos[currentPhotoIndex + 1]
+        image = nil
+    }
+    
+    private func saveNotes() {
+        currentPhoto.notes = notesText.isEmpty ? nil : notesText
+        try? ctx.save()
+        showNotesEditor = false
+    }
+    
+    private func saveDate() {
+        currentPhoto.date = selectedDate
+        try? ctx.save()
+        showDatePicker = false
+        // Note: Photo ordering in parent view will update automatically via SwiftData @Query
+    }
+    
+    private func toggleHidden() {
+        currentPhoto.isHidden.toggle()
+        try? ctx.save()
+        // Note: Hidden photos will be filtered out automatically in Watch/Compare via @Query
+    }
+    
+    private func deletePhoto() {
+        ctx.delete(currentPhoto)
+        try? ctx.save()
+        
+        // Delete file
+        Task {
+            try? await PhotoStore.deleteFromAppDirectory(localId: currentPhoto.assetLocalId)
+        }
+        
+        dismiss()
+    }
+}
+
+// MARK: - Photo Adjust Sheet (Crop/Align with Ghost)
+struct PhotoAdjustSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var ctx
 
@@ -940,8 +1357,6 @@ struct PhotoEditSheet: View {
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var minScale: CGFloat = 1
-    @State private var showDeleteConfirmation = false
-    @State private var isDeleting = false
     @State private var hasCalculatedInitialScale = false
     
     // Ghost overlay
@@ -1084,6 +1499,7 @@ struct PhotoEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar, .bottomBar)
             .toolbarBackground(.visible, for: .navigationBar, .bottomBar)
+            .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: { dismiss() }) {
@@ -1105,7 +1521,7 @@ struct PhotoEditSheet: View {
                                 .font(.body.weight(.semibold))
                         }
                     }
-                    .disabled(isSaving || image == nil || isDeleting)
+                    .disabled(isSaving || image == nil)
                 }
             }
             .task { 
@@ -1114,9 +1530,9 @@ struct PhotoEditSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 12) {
-                    // Top row: Ghost Overlay and Delete Photo buttons side by side
-                    HStack(spacing: 16) {
-                        if ghostImage != nil {
+                    // Ghost Overlay controls
+                    if ghostImage != nil {
+                        HStack(spacing: 16) {
                             Button(action: { showGhost.toggle() }) {
                                 HStack(spacing: 8) {
                                     Image(systemName: showGhost ? "eye.fill" : "eye.slash.fill")
@@ -1125,51 +1541,37 @@ struct PhotoEditSheet: View {
                                 }
                                 .foregroundColor(showGhost ? .cyan : .white.opacity(0.7))
                             }
+                            
+                            Spacer()
                         }
                         
-                        Spacer()
-                        
-                        Button(role: .destructive, action: {
-                            showDeleteConfirmation = true
-                        }) {
-                            HStack(spacing: 6) {
-                                Text("Delete Photo")
-                                Image(systemName: "trash")
+                        // Slider
+                        if showGhost {
+                            HStack {
+                                Image(systemName: "circle.lefthalf.filled")
+                                    .foregroundColor(.white.opacity(0.7))
+                                Slider(value: $ghostOpacity, in: 0...1)
+                                    .tint(.cyan)
+                                Text("\(Int(ghostOpacity * 100))%")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 40)
                             }
-                            .foregroundColor(.red)
-                            .font(.subheadline.weight(.medium))
-                        }
-                        .disabled(isDeleting)
-                    }
-                    
-                    // Bottom row: Slider (always reserve space, but hide when ghost is disabled)
-                    HStack {
-                        if showGhost && ghostImage != nil {
-                            Image(systemName: "circle.lefthalf.filled")
-                                .foregroundColor(.white.opacity(0.7))
-                            Slider(value: $ghostOpacity, in: 0...1)
-                                .tint(.cyan)
-                            Text("\(Int(ghostOpacity * 100))%")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                                .frame(width: 40)
                         }
                     }
-                    .frame(height: 28) // Fixed height to maintain consistent bottom bar size
                 }
                 .padding(.horizontal)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
-            }
-            .alert("Delete Photo", isPresented: $showDeleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
-                    Task { await deletePhoto() }
-                }
-            } message: {
-                Text("Are you sure you want to delete this photo? This action cannot be undone.")
+                .background(
+                    ZStack {
+                        Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                    }
+                    .ignoresSafeArea(edges: .bottom)
+                )
             }
             .alert("Error", isPresented: $showErrorAlert) {
                 Button("OK", role: .cancel) { }
@@ -1220,42 +1622,62 @@ struct PhotoEditSheet: View {
             }
             
             print("👻 Loading ghost image from first photo...")
-            let screenSize = UIScreen.main.bounds.size
-            let scale = UIScreen.main.scale
-            let targetSize = CGSize(width: screenSize.width * scale, height: screenSize.width * 5/4 * scale)
             
-            if let loadedGhost = await PhotoStore.fetchUIImage(localId: firstPhoto.assetLocalId, targetSize: targetSize) {
+            if let loadedGhost = await PhotoStore.fetchUIImage(localId: firstPhoto.assetLocalId, targetSize: nil) {
                 await MainActor.run {
-                    // Apply the ghost's transform if it has one
-                    let ghostTransform = firstPhoto.alignTransform
-                    if ghostTransform.scale != 1 || ghostTransform.offsetX != 0 || ghostTransform.offsetY != 0 || ghostTransform.rotation != 0 {
-                        // Ghost has been edited - need to render it with transform
-                        let renderer = UIGraphicsImageRenderer(size: loadedGhost.size)
-                        let transformedGhost = renderer.image { ctx in
-                            ctx.cgContext.translateBy(x: loadedGhost.size.width/2, y: loadedGhost.size.height/2)
-                            ctx.cgContext.rotate(by: CGFloat(ghostTransform.rotation))
-                            ctx.cgContext.scaleBy(x: ghostTransform.scale, y: ghostTransform.scale)
-                            ctx.cgContext.translateBy(x: ghostTransform.offsetX, y: ghostTransform.offsetY)
-                            
-                            let drawRect = CGRect(
-                                x: -loadedGhost.size.width/2,
-                                y: -loadedGhost.size.height/2,
-                                width: loadedGhost.size.width,
-                                height: loadedGhost.size.height
-                            )
-                            loadedGhost.draw(in: drawRect)
-                        }
-                        self.ghostImage = transformedGhost
-                    } else {
-                        self.ghostImage = loadedGhost
-                    }
-                    print("👻 Ghost image loaded successfully")
+                    // Render the ghost with its transform as a 4:5 cropped image (same as main display)
+                    let croppedGhost = renderCroppedGhostImage(from: loadedGhost, transform: firstPhoto.alignTransform)
+                    self.ghostImage = croppedGhost
+                    print("👻 Ghost image loaded and cropped successfully")
                 }
             } else {
                 print("❌ Failed to load ghost image")
             }
         } catch {
             print("❌ Error fetching photos for ghost: \(error)")
+        }
+    }
+    
+    private func renderCroppedGhostImage(from sourceImage: UIImage, transform: AlignTransform) -> UIImage {
+        // Render ghost image with same 4:5 crop logic as main image
+        let targetWidth = sourceImage.size.width
+        let targetHeight = targetWidth * 5.0 / 4.0
+        let targetSize = CGSize(width: targetWidth, height: targetHeight)
+        
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+            
+            // Move to center
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+            
+            // Apply transform
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
+            
+            // Calculate fit size
+            let imageAspect = sourceImage.size.width / sourceImage.size.height
+            let cropAspect = targetSize.width / targetSize.height
+            
+            var drawSize: CGSize
+            if imageAspect > cropAspect {
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+            
+            // Draw centered
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            
+            sourceImage.draw(in: drawRect)
         }
     }
     
@@ -1320,36 +1742,6 @@ struct PhotoEditSheet: View {
         }
     }
     
-    private func deletePhoto() async {
-        isDeleting = true
-        
-        await MainActor.run {
-            do {
-                // Delete from SwiftData
-                ctx.delete(photo)
-                try ctx.save()
-                print("✅ Photo deleted from database")
-                
-                // Delete the image file from app directory
-                Task {
-                    do {
-                        try await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
-                        print("✅ Photo file deleted from app directory")
-                    } catch {
-                        print("⚠️ Warning: Could not delete photo file: \(error)")
-                    }
-                }
-                
-                isDeleting = false
-                dismiss()
-            } catch {
-                print("❌ Error deleting photo: \(error)")
-                errorMessage = "Failed to delete photo: \(error.localizedDescription)"
-                showErrorAlert = true
-                isDeleting = false
-            }
-        }
-    }
 }
 
 // MARK: - Journey Compare Sheet
@@ -1389,125 +1781,497 @@ struct JourneyCompareView: View {
     @State private var left: ProgressPhoto?
     @State private var right: ProgressPhoto?
     @State private var mode: CompareMode = .parallel
+    @State private var showDates = true
+    @State private var fitImage = false
+    @State private var selectedSide: SelectionSide = .left
+    @State private var showTooltip = false
     
     enum CompareMode: String, CaseIterable {
         case parallel = "Parallel"
         case slider = "Slider"
     }
     
+    enum SelectionSide {
+        case left, right
+    }
+    
+    // Filter out hidden photos
+    private var visiblePhotos: [ProgressPhoto] {
+        photos.filter { !$0.isHidden }
+    }
+    
+    private func flipPhotos() {
+        let temp = left
+        left = right
+        right = temp
+    }
+    
+    private func selectPhoto(_ photo: ProgressPhoto) {
+        if selectedSide == .left {
+            left = photo
+        } else {
+            right = photo
+        }
+        // Hide tooltip when photo is selected
+        withAnimation(.easeOut(duration: 0.2)) {
+            showTooltip = false
+        }
+    }
+    
+    private func selectSide(_ side: SelectionSide) {
+        selectedSide = side
+        withAnimation(.easeIn(duration: 0.2)) {
+            showTooltip = true
+        }
+        
+        // Auto-hide tooltip after 3 seconds
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showTooltip = false
+                }
+            }
+        }
+    }
+    
     var body: some View {
-        VStack(spacing: 16) {
-            if photos.count >= 2 {
-                // Mode picker
+        VStack(spacing: 0) {
+            if visiblePhotos.count >= 2 {
+                // Increased spacing for title/done button
+                Spacer().frame(height: AppStyle.Spacing.lg)
+                
+                // Segmented control
                 Picker("Mode", selection: $mode) {
                     ForEach(CompareMode.allCases, id: \.self) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
+                .padding(.horizontal)
                 
-                // Photo selectors
-                HStack(spacing: 16) {
-                    VStack(spacing: 8) {
-                        Text("Before")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
+                Spacer().frame(height: AppStyle.Spacing.sm)
+                
+                // Action buttons ABOVE comparison
+                if left != nil && right != nil {
+                    HStack(spacing: AppStyle.Spacing.xl) {
+                        // Dates toggle
+                        Button(action: {
+                            showDates.toggle()
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: showDates ? "calendar.badge.checkmark" : "calendar")
+                                    .font(.system(size: AppStyle.IconSize.xl))
+                                    .foregroundColor(showDates ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                                Text("Dates")
+                                    .font(AppStyle.FontStyle.caption)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
+                            }
+                            .frame(width: 70)
+                        }
                         
-                        Menu {
-                            ForEach(photos) { photo in
-                                Button(action: {
-                                    left = photo
-                                }) {
-                                    Text(photo.date.formatted(date: .abbreviated, time: .omitted))
-                                }
+                        // Fit Image toggle
+                        Button(action: {
+                            fitImage.toggle()
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: fitImage ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
+                                    .font(.system(size: AppStyle.IconSize.xl))
+                                    .foregroundColor(fitImage ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                                Text("Fit Image")
+                                    .font(AppStyle.FontStyle.caption)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
                             }
-                        } label: {
-                            if let left = left {
-                                PhotoGridItem(photo: left)
-                                    .frame(height: 80)
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.white.opacity(0.06))
-                                    .frame(height: 80)
-                                    .overlay(
-                                        Text("Select")
-                                            .font(.caption)
-                                            .foregroundColor(.white.opacity(0.7))
-                                    )
+                            .frame(width: 70)
+                        }
+                        
+                        // Flip action
+                        Button(action: flipPhotos) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.system(size: AppStyle.IconSize.xl))
+                                    .foregroundColor(AppStyle.Colors.textPrimary)
+                                Text("Flip")
+                                    .font(AppStyle.FontStyle.caption)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
                             }
+                            .frame(width: 70)
                         }
                     }
-                    
-                    VStack(spacing: 8) {
-                        Text("After")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                        
-                        Menu {
-                            ForEach(photos) { photo in
-                                Button(action: {
-                                    right = photo
-                                }) {
-                                    Text(photo.date.formatted(date: .abbreviated, time: .omitted))
-                                }
-                            }
-                        } label: {
-                            if let right = right {
-                                PhotoGridItem(photo: right)
-                                    .frame(height: 80)
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.white.opacity(0.06))
-                                    .frame(height: 80)
-                                    .overlay(
-                                        Text("Select")
-                                            .font(.caption)
-                                            .foregroundColor(.white.opacity(0.7))
-                                    )
-                            }
-                        }
-                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, AppStyle.Spacing.sm)
                 }
                 
-                // Compare view
+                // Main comparison view - full width with 4:5 ratio
                 if let left = left, let right = right {
-                    CompareCanvas(left: left, right: right, mode: mode == .parallel ? .parallel : .slider)
-                        .frame(height: 300)
-                        .glassCard()
+                    GeometryReader { geometry in
+                        let availableWidth = geometry.size.width
+                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
+                        
+                        ZStack {
+                            ImprovedCompareCanvas(
+                                left: left,
+                                right: right,
+                                mode: mode,
+                                showDates: showDates,
+                                fitImage: fitImage
+                            )
+                            .frame(width: availableWidth, height: canvasHeight)
+                            .background(
+                                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                                    .fill(AppStyle.Colors.panel)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                                    .stroke(AppStyle.Colors.border, lineWidth: 1)
+                            )
+                        
+                        // Tap areas to select which side to replace
+                        HStack(spacing: 0) {
+                            // Left tap area
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectSide(.left)
+                                }
+                                .overlay(
+                                    VStack {
+                                        if selectedSide == .left && showTooltip {
+                                            ZStack {
+                                                Circle()
+                                                    .fill(.white)
+                                                    .frame(width: 40, height: 40)
+                                                    .shadow(radius: 4)
+                                                
+                                                Text("L")
+                                                    .font(.system(size: 20, weight: .bold))
+                                                    .foregroundColor(.black)
+                                            }
+                                            .padding(.top, 20)
+                                            
+                                            Text("Tap an image\nbelow to replace")
+                                                .font(AppStyle.FontStyle.caption)
+                                                .multilineTextAlignment(.center)
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                )
+                                                .padding(.top, 8)
+                                                .transition(.opacity)
+                                        }
+                                        Spacer()
+                                    }
+                                )
+                            
+                            // Right tap area
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectSide(.right)
+                                }
+                                .overlay(
+                                    VStack {
+                                        if selectedSide == .right && showTooltip {
+                                            ZStack {
+                                                Circle()
+                                                    .fill(.white)
+                                                    .frame(width: 40, height: 40)
+                                                    .shadow(radius: 4)
+                                                
+                                                Text("R")
+                                                    .font(.system(size: 20, weight: .bold))
+                                                    .foregroundColor(.black)
+                                            }
+                                            .padding(.top, 20)
+                                            
+                                            Text("Tap an image\nbelow to replace")
+                                                .font(AppStyle.FontStyle.caption)
+                                                .multilineTextAlignment(.center)
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                )
+                                                .padding(.top, 8)
+                                                .transition(.opacity)
+                                        }
+                                        Spacer()
+                                    }
+                                )
+                        }
+                        }
+                    }
+                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0) // Reserve space for GeometryReader with 4:5 ratio
+                    
+                    Spacer().frame(height: AppStyle.Spacing.lg)
+                    
+                    // Single photo slider
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(visiblePhotos) { photo in
+                                Button(action: {
+                                    selectPhoto(photo)
+                                }) {
+                                    ZStack(alignment: .topLeading) {
+                                        PhotoGridItem(photo: photo)
+                                            .frame(width: 120, height: 150)
+                                        
+                                        // Selection indicators
+                                        VStack(spacing: 4) {
+                                            if self.left?.id == photo.id {
+                                                Circle()
+                                                    .fill(AppStyle.Colors.accentRed)
+                                                    .frame(width: 28, height: 28)
+                                                    .overlay(
+                                                        Text("L")
+                                                            .font(.system(size: 14, weight: .bold))
+                                                            .foregroundColor(.white)
+                                                    )
+                                            }
+                                            if self.right?.id == photo.id {
+                                                Circle()
+                                                    .fill(AppStyle.Colors.accentRed)
+                                                    .frame(width: 28, height: 28)
+                                                    .overlay(
+                                                        Text("R")
+                                                            .font(.system(size: 14, weight: .bold))
+                                                            .foregroundColor(.white)
+                                                    )
+                                            }
+                                        }
+                                        .padding(8)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    .padding(.bottom, AppStyle.Spacing.lg)
+                    
                 } else {
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.white.opacity(0.06))
-                        .frame(height: 300)
-                        .overlay(
-                            Text("Select two photos to compare")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                        )
+                    // Empty state
+                    GeometryReader { geometry in
+                        let availableWidth = geometry.size.width
+                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
+                        
+                        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                            .fill(AppStyle.Colors.panel)
+                            .frame(width: availableWidth, height: canvasHeight)
+                            .overlay(
+                                Text("Select two photos to compare")
+                                    .font(AppStyle.FontStyle.body)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
+                            )
+                    }
+                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
                 }
             } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(0.06))
+                // No photos state
+                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                    .fill(AppStyle.Colors.panel)
                     .frame(height: 200)
                     .overlay(
                         VStack(spacing: 8) {
                             Image(systemName: "photo.on.rectangle.angled")
                                 .font(.title2)
-                                .foregroundColor(.white.opacity(0.5))
+                                .foregroundColor(AppStyle.Colors.textTertiary)
                             Text("Add at least 2 photos to compare")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
+                                .font(AppStyle.FontStyle.body)
+                                .foregroundColor(AppStyle.Colors.textSecondary)
                                 .multilineTextAlignment(.center)
                         }
                     )
+                    .padding(.horizontal)
             }
+            
+            Spacer()
         }
         .onAppear {
-            // Auto-select first two photos if available
-            if left == nil && right == nil && photos.count >= 2 {
-                left = photos.first
-                right = photos.count > 1 ? photos[1] : nil
+            // Auto-select oldest (before) and newest (after) visible photos
+            if left == nil && right == nil && visiblePhotos.count >= 2 {
+                left = visiblePhotos.last  // Oldest photo (Picture 1)
+                right = visiblePhotos.first  // Newest photo (Picture 2)
             }
         }
+    }
+}
+
+// MARK: - Improved Compare Canvas
+struct ImprovedCompareCanvas: View {
+    let left: ProgressPhoto
+    let right: ProgressPhoto
+    let mode: JourneyCompareView.CompareMode
+    let showDates: Bool
+    let fitImage: Bool
+    
+    @State private var leftImg: UIImage?
+    @State private var rightImg: UIImage?
+    @State private var sliderPosition: CGFloat = 0.5
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                if let l = leftImg, let r = rightImg {
+                    switch mode {
+                    case .parallel:
+                        parallelView(leftImg: l, rightImg: r, width: geometry.size.width, height: geometry.size.height)
+                    case .slider:
+                        sliderView(leftImg: l, rightImg: r, width: geometry.size.width, height: geometry.size.height)
+                    }
+                } else {
+                    ProgressView()
+                        .tint(AppStyle.Colors.textPrimary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .task {
+            await loadImages()
+        }
+        .onChange(of: left) { _, _ in
+            Task { await loadImages() }
+        }
+        .onChange(of: right) { _, _ in
+            Task { await loadImages() }
+        }
+    }
+    
+    private func parallelView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            // Left image with date
+            VStack(spacing: 4) {
+                Image(uiImage: leftImg)
+                    .resizable()
+                    .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                    .frame(width: (width - 16) / 2, height: height - (showDates ? 30 : 0))
+                    .clipped()
+                    .cornerRadius(AppStyle.Corner.md)
+                
+                if showDates {
+                    Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                }
+            }
+            
+            // Right image with date
+            VStack(spacing: 4) {
+                Image(uiImage: rightImg)
+                    .resizable()
+                    .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                    .frame(width: (width - 16) / 2, height: height - (showDates ? 30 : 0))
+                    .clipped()
+                    .cornerRadius(AppStyle.Corner.md)
+                
+                if showDates {
+                    Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                }
+            }
+        }
+        .padding(8)
+    }
+    
+    private func sliderView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
+        ZStack {
+            // Left image (base layer)
+            Image(uiImage: leftImg)
+                .resizable()
+                .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                .frame(width: width, height: height)
+                .clipped()
+            
+            // Right image (masked overlay)
+            Image(uiImage: rightImg)
+                .resizable()
+                .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                .frame(width: width, height: height)
+                .clipped()
+                .mask(alignment: .leading) {
+                    Rectangle()
+                        .frame(width: width - (width * sliderPosition))
+                        .offset(x: width * sliderPosition)
+                }
+            
+            // Divider line with handle
+            VStack {
+                Circle()
+                    .fill(AppStyle.Colors.textPrimary)
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Image(systemName: "arrow.left.and.right")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(AppStyle.Colors.bgDark)
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+            }
+            .frame(maxHeight: .infinity)
+            .frame(width: 3)
+            .background(AppStyle.Colors.textPrimary)
+            .position(x: width * sliderPosition, y: height / 2)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let newPosition = value.location.x / width
+                        sliderPosition = min(max(newPosition, 0), 1)
+                    }
+            )
+            
+            // Date labels for slider mode
+            if showDates {
+                VStack {
+                    HStack {
+                        Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                            .font(AppStyle.FontStyle.caption2)
+                            .foregroundColor(AppStyle.Colors.textPrimary)
+                            .padding(6)
+                            .background(AppStyle.Colors.bgDark.opacity(0.8))
+                            .cornerRadius(6)
+                            .padding(8)
+                        
+                        Spacer()
+                        
+                        Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                            .font(AppStyle.FontStyle.caption2)
+                            .foregroundColor(AppStyle.Colors.textPrimary)
+                            .padding(6)
+                            .background(AppStyle.Colors.bgDark.opacity(0.8))
+                            .cornerRadius(6)
+                            .padding(8)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .cornerRadius(AppStyle.Corner.lg)
+    }
+    
+    private func loadImages() async {
+        // Capture asset IDs on main actor to avoid Sendable warnings
+        let leftLocalId = left.assetLocalId
+        let rightLocalId = right.assetLocalId
+        
+        // Calculate target size for downsampling
+        let screenSize = UIScreen.main.bounds.size
+        let scale = UIScreen.main.scale
+        let targetSize = CGSize(
+            width: screenSize.width * scale / 2,  // Half width for side-by-side
+            height: screenSize.height * scale / 2
+        )
+        
+        // Load both images concurrently
+        async let leftTask = PhotoStore.fetchUIImage(localId: leftLocalId, targetSize: targetSize)
+        async let rightTask = PhotoStore.fetchUIImage(localId: rightLocalId, targetSize: targetSize)
+        
+        leftImg = await leftTask
+        rightImg = await rightTask
     }
 }
 
@@ -1548,97 +2312,24 @@ struct JourneyWatchView: View {
     @State private var isPlaying = false
     @State private var currentIndex = 0
     @State private var playbackSpeed: Double = 1.0
+    @State private var showExportSheet = false
+    @State private var isExporting = false
+    @State private var exportProgress: Double = 0
+    @State private var exportedVideoURL: URL?
+    
+    // Reverse photos to show oldest → newest (chronological order), excluding hidden
+    private var chronologicalPhotos: [ProgressPhoto] {
+        photos.filter { !$0.isHidden }.sorted { $0.date < $1.date }
+    }
     
     var body: some View {
-        VStack(spacing: 16) {
-            if !photos.isEmpty {
-                // Main photo display
-                if currentIndex < photos.count {
-                    PhotoGridItem(photo: photos[currentIndex])
-                        .frame(height: 300)
-                        .glassCard()
-                } else {
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.white.opacity(0.06))
-                        .frame(height: 300)
-                }
-                
-                // Progress bar
-                HStack(spacing: 12) {
-                    Text("1")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    Slider(value: Binding(
-                        get: { Double(currentIndex) },
-                        set: { currentIndex = Int($0) }
-                    ), in: 0...Double(max(0, photos.count - 1)), step: 1)
-                    .tint(.white)
-                    
-                    Text("\(photos.count)")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                
-                // Controls
-                HStack(spacing: 20) {
-                    Button(action: {
-                        if currentIndex > 0 {
-                            currentIndex -= 1
-                        }
-                    }) {
-                        Image(systemName: "backward.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
-                    .disabled(currentIndex == 0)
-                    
-                    Button(action: {
-                        isPlaying.toggle()
-                    }) {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
-                    
-                    Button(action: {
-                        if currentIndex < photos.count - 1 {
-                            currentIndex += 1
-                        }
-                    }) {
-                        Image(systemName: "forward.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                    }
-                    .disabled(currentIndex >= photos.count - 1)
-                }
-                .padding()
-                .glassCard()
-                
-                // Speed control
-                VStack(spacing: 8) {
-                    Text("Playback Speed: \(playbackSpeed, specifier: "%.1f")x")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    Slider(value: $playbackSpeed, in: 0.5...3.0, step: 0.1)
-                        .tint(.white)
-                }
+        VStack(spacing: AppStyle.Spacing.lg) {
+            if chronologicalPhotos.isEmpty {
+                emptyState
+            } else if chronologicalPhotos.count == 1 {
+                singlePhotoState
             } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(0.06))
-                    .frame(height: 200)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            Image(systemName: "play.rectangle")
-                                .font(.title2)
-                                .foregroundColor(.white.opacity(0.5))
-                            Text("Add photos to watch your progress")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                                .multilineTextAlignment(.center)
-                        }
-                    )
+                normalState
             }
         }
         .onChange(of: isPlaying) { _, playing in
@@ -1646,22 +2337,375 @@ struct JourneyWatchView: View {
                 startPlayback()
             }
         }
+        .onDisappear {
+            isPlaying = false
+        }
+        .sheet(item: $exportedVideoURL) { url in
+            if #available(iOS 16.0, *) {
+                ShareSheet(url: url)
+            }
+        }
+    }
+    
+    private var emptyState: some View {
+        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+            .fill(AppStyle.Colors.panel)
+            .frame(height: 200)
+            .overlay(
+                VStack(spacing: 8) {
+                    Image(systemName: "play.rectangle")
+                        .font(.title2)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    Text("Add photos to watch your progress")
+                        .font(AppStyle.FontStyle.body)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+            )
+    }
+    
+    private var singlePhotoState: some View {
+        VStack(spacing: AppStyle.Spacing.lg) {
+            PhotoGridItem(photo: chronologicalPhotos[0])
+                .frame(height: 400)
+                .glassCard()
+            
+            Text("1 / 1 • \(chronologicalPhotos[0].date.formatted(date: .abbreviated, time: .omitted))")
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textSecondary)
+            
+            Text("Add more photos to create a slideshow")
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textTertiary)
+        }
+    }
+    
+    private var normalState: some View {
+        VStack(spacing: AppStyle.Spacing.lg) {
+            // Main photo display
+            if currentIndex < chronologicalPhotos.count {
+                PhotoGridItem(photo: chronologicalPhotos[currentIndex])
+                    .frame(height: 400)
+                    .glassCard()
+            }
+            
+            // Position indicator: "1 / N • Date"
+            Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[currentIndex].date.formatted(date: .abbreviated, time: .omitted))")
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textSecondary)
+            
+            // Scrubber slider
+            HStack(spacing: 12) {
+                Text("1")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                    .frame(width: 20)
+                
+                Slider(value: Binding(
+                    get: { Double(currentIndex) },
+                    set: { currentIndex = Int($0) }
+                ), in: 0...Double(max(0, chronologicalPhotos.count - 1)), step: 1)
+                .tint(AppStyle.Colors.accent)
+                
+                Text("\(chronologicalPhotos.count)")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                    .frame(width: 30, alignment: .trailing)
+            }
+            .padding(.horizontal)
+            
+            // Controls: Previous | Play/Pause | Next
+            HStack(spacing: AppStyle.Spacing.xxxl) {
+                Button(action: {
+                    if currentIndex > 0 {
+                        currentIndex -= 1
+                    }
+                }) {
+                    Image(systemName: "backward.fill")
+                        .font(.title2)
+                        .foregroundColor(currentIndex == 0 ? AppStyle.Colors.textTertiary : AppStyle.Colors.textPrimary)
+                }
+                .disabled(currentIndex == 0)
+                .accessibilityLabel("Previous photo")
+                .accessibilityHint("Go to the previous photo in the slideshow")
+                
+                Button(action: {
+                    isPlaying.toggle()
+                }) {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(AppStyle.Colors.textPrimary)
+                }
+                .accessibilityLabel(isPlaying ? "Pause slideshow" : "Play slideshow")
+                .accessibilityHint("Play through all \(chronologicalPhotos.count) photos from oldest to newest")
+                
+                Button(action: {
+                    if currentIndex < chronologicalPhotos.count - 1 {
+                        currentIndex += 1
+                    }
+                }) {
+                    Image(systemName: "forward.fill")
+                        .font(.title2)
+                        .foregroundColor(currentIndex >= chronologicalPhotos.count - 1 ? AppStyle.Colors.textTertiary : AppStyle.Colors.textPrimary)
+                }
+                .disabled(currentIndex >= chronologicalPhotos.count - 1)
+                .accessibilityLabel("Next photo")
+                .accessibilityHint("Go to the next photo in the slideshow")
+            }
+            .padding(.vertical, AppStyle.Spacing.sm)
+            
+            // Export button
+            if isExporting {
+                VStack(spacing: 8) {
+                    ProgressView(value: exportProgress, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .tint(AppStyle.Colors.accentCyan)
+                    
+                    Text("Exporting: \(Int(exportProgress * 100))%")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                }
+                .padding()
+                .glassCard()
+            } else {
+                Button(action: {
+                    Task {
+                        await exportVideo()
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: AppStyle.IconSize.lg))
+                        Text("Export Video")
+                            .font(AppStyle.FontStyle.headline)
+                    }
+                    .foregroundColor(AppStyle.Colors.textPrimary)
+                    .padding(.horizontal, AppStyle.Spacing.xl)
+                    .padding(.vertical, AppStyle.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
+                            .fill(AppStyle.Colors.panel)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
+                                    .stroke(AppStyle.Colors.border, lineWidth: 1)
+                            )
+                    )
+                }
+            }
+        }
+        .padding(.horizontal)
     }
     
     private func startPlayback() {
-        guard isPlaying && !photos.isEmpty else { return }
+        guard isPlaying && !chronologicalPhotos.isEmpty else { return }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + (1.0 / playbackSpeed)) {
-            if isPlaying {
-                if currentIndex < photos.count - 1 {
-                    currentIndex += 1
-                    startPlayback()
+            if self.isPlaying {
+                if self.currentIndex < self.chronologicalPhotos.count - 1 {
+                    self.currentIndex += 1
+                    self.startPlayback()
                 } else {
                     // Loop back to start
-                    currentIndex = 0
-                    startPlayback()
+                    self.currentIndex = 0
+                    self.startPlayback()
                 }
             }
         }
     }
+    
+    private func exportVideo() async {
+        await MainActor.run {
+            isExporting = true
+            exportProgress = 0
+        }
+        
+        // Capture needed data before detached task to avoid Sendable warnings
+        let photosToExport = chronologicalPhotos
+        let journeyName = journey.name
+        
+        // Run export on background queue
+        let result = await Task.detached {
+            return await VideoExporter.exportProgressVideo(
+                photos: photosToExport,
+                journeyName: journeyName,
+                progressCallback: { progress in
+                    Task { @MainActor in
+                        exportProgress = progress
+                    }
+                }
+            )
+        }.value
+        
+        await MainActor.run {
+            isExporting = false
+            if let url = result {
+                exportedVideoURL = url
+            }
+        }
+    }
+}
+
+// MARK: - Video Exporter
+actor VideoExporter {
+    static func exportProgressVideo(
+        photos: [ProgressPhoto],
+        journeyName: String,
+        progressCallback: @escaping (Double) -> Void
+    ) async -> URL? {
+        guard !photos.isEmpty else { return nil }
+        
+        // Configuration
+        let fps = 30
+        let frameDuration: Double = 1.0  // 1 second per photo
+        let framesPerPhoto = Int(frameDuration * Double(fps))
+        let resolution = CGSize(width: 1080, height: 1350)  // 4:5 aspect ratio
+        
+        // Create temp file
+        let tempDir = FileManager.default.temporaryDirectory
+        let timestamp = Date().timeIntervalSince1970
+        let outputURL = tempDir.appendingPathComponent("progress_\(journeyName)_\(Int(timestamp)).mp4")
+        
+        // Remove if exists
+        try? FileManager.default.removeItem(at: outputURL)
+        
+        guard let videoWriter = try? AVAssetWriter(outputURL: outputURL, fileType: .mp4) else {
+            return nil
+        }
+        
+        // Video settings
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: resolution.width,
+            AVVideoHeightKey: resolution.height
+        ]
+        
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferWidthKey as String: resolution.width,
+                kCVPixelBufferHeightKey as String: resolution.height
+            ]
+        )
+        
+        guard videoWriter.canAdd(videoInput) else { return nil }
+        videoWriter.add(videoInput)
+        
+        guard videoWriter.startWriting() else { return nil }
+        videoWriter.startSession(atSourceTime: .zero)
+        
+        var frameCount = 0
+        let totalFrames = photos.count * framesPerPhoto
+        
+        // Write frames
+        for photo in photos {
+            // Load image downsampled to target resolution
+            guard let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: resolution) else {
+                continue
+            }
+            
+            // Render this image for the required number of frames
+            for _ in 0..<framesPerPhoto {
+                while !videoInput.isReadyForMoreMediaData {
+                    try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+                }
+                
+                let presentationTime = CMTime(value: Int64(frameCount), timescale: Int32(fps))
+                
+                if let pixelBuffer = createPixelBuffer(from: image, size: resolution) {
+                    adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+                }
+                
+                frameCount += 1
+                
+                // Update progress
+                let progress = Double(frameCount) / Double(totalFrames)
+                progressCallback(progress)
+            }
+        }
+        
+        videoInput.markAsFinished()
+        await videoWriter.finishWriting()
+        
+        return videoWriter.status == .completed ? outputURL : nil
+    }
+    
+    private static func createPixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
+        let attrs = [
+            kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue!
+        ] as CFDictionary
+        
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            Int(size.width),
+            Int(size.height),
+            kCVPixelFormatType_32ARGB,
+            attrs,
+            &pixelBuffer
+        )
+        
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
+            return nil
+        }
+        
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        
+        let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer),
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+        )
+        
+        guard let ctx = context, let cgImage = image.cgImage else {
+            return nil
+        }
+        
+        // Fill background
+        ctx.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+        ctx.fill(CGRect(origin: .zero, size: size))
+        
+        // Calculate letterbox rect
+        let imageAspect = image.size.width / image.size.height
+        let targetAspect = size.width / size.height
+        
+        let drawRect: CGRect
+        if imageAspect > targetAspect {
+            // Image is wider - fit width
+            let height = size.width / imageAspect
+            drawRect = CGRect(x: 0, y: (size.height - height) / 2, width: size.width, height: height)
+        } else {
+            // Image is taller - fit height
+            let width = size.height * imageAspect
+            drawRect = CGRect(x: (size.width - width) / 2, y: 0, width: width, height: size.height)
+        }
+        
+        ctx.draw(cgImage, in: drawRect)
+        
+        return buffer
+    }
+}
+
+// MARK: - Share Sheet
+@available(iOS 16.0, *)
+struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// Make URL identifiable for sheet presentation
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
 }

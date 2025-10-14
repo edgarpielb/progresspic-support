@@ -1,11 +1,20 @@
 import SwiftUI
 
-// Reusable glass styles
+// Reusable glass styles with proper dark backgrounds to prevent purple tint
 struct GlassCard: ViewModifier {
     var corner: CGFloat = 20
     func body(content: Content) -> some View {
         content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .background(
+                ZStack {
+                    // Dark base layer to prevent purple tint
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                    // Material blur on top
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)
                     .stroke(Color.white.opacity(0.25), lineWidth: 0.6)
@@ -17,7 +26,16 @@ struct GlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(
+                ZStack {
+                    // Dark base layer to prevent purple tint
+                    Capsule()
+                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                    // Material blur on top
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                }
+            )
             .overlay(
                 Capsule().stroke(Color.white.opacity(0.28), lineWidth: 0.7)
             )
@@ -29,9 +47,14 @@ struct GlassTile: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: corner, style: .continuous))
+                ZStack {
+                    // Dark base layer to prevent purple tint
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                    // Material blur on top
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: corner, style: .continuous)

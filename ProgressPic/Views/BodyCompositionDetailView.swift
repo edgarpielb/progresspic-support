@@ -815,8 +815,6 @@ struct HealthyRangeComparison {
             return 10...20 // Athletic to fitness range
         case .female:
             return 18...28 // Athletic to fitness range
-        case .other:
-            return 10...28
         }
     }
     
@@ -830,7 +828,6 @@ struct HealthyRangeComparison {
             switch gender {
             case .male: return 55...75
             case .female: return 40...60
-            case .other: return 40...75
             }
         }
         
@@ -846,8 +843,6 @@ struct HealthyRangeComparison {
             baseLMI = (16.5, 20.5) // Average male range
         case .female:
             baseLMI = (13.5, 17.5) // Average female range
-        case .other:
-            baseLMI = (13.5, 20.5)
         }
         
         // Adjust for age - lean mass typically decreases with age
@@ -887,7 +882,6 @@ struct HealthyRangeComparison {
             switch gender {
             case .male: return 60...80
             case .female: return 50...70
-            case .other: return 50...80
             }
         }
         

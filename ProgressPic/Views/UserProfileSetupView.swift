@@ -5,77 +5,101 @@ struct UserProfileSetupView: View {
     @State private var birthDate = Date()
     @State private var heightCm: String = ""
     @State private var selectedGender: UserProfile.Gender = .male
+    @State private var selectedUnit: MeasureUnit = .cm
+    @State private var isEditMode = false
     
     var onComplete: (UserProfile) -> Void
     
+    init(onComplete: @escaping (UserProfile) -> Void = { _ in }) {
+        self.onComplete = onComplete
+    }
+    
     var body: some View {
-        ZStack {
-            Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Set Up Your Profile")
-                            .font(.largeTitle.bold())
-                            .foregroundColor(.white)
+        NavigationStack {
+            ZStack {
+                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 24) {
+                            // Header
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(isEditMode ? "Edit Your Profile" : "Set Up Your Profile")
+                                    .font(.largeTitle.bold())
+                                    .foregroundColor(.white)
+                                
+                            Text(isEditMode ? "Update your health information" : "Help us provide better health insights by adding your information")
+                                .font(.callout)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.top, 8)
                         
-                        Text("Help us provide better health insights by adding your information")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 40)
-                    
-                    // Birth Date
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Birth Date", systemImage: "calendar")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        
-                        DatePicker(
-                            "Select date",
-                            selection: $birthDate,
-                            in: ...Date(),
-                            displayedComponents: .date
-                        )
-                        .datePickerStyle(.compact)
-                        .colorScheme(.dark)
-                        .padding()
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-                    
-                    // Height
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Height (cm)", systemImage: "ruler")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        
-                        TextField("Enter height", text: $heightCm)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(.plain)
+                        // Birth Date
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Birth Date", systemImage: "calendar")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            DatePicker(
+                                "Select date",
+                                selection: $birthDate,
+                                in: ...Date(),
+                                displayedComponents: .date
+                            )
+                            .datePickerStyle(.compact)
+                            .colorScheme(.dark)
                             .padding()
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(12)
-                            .foregroundColor(.white)
-                    }
-                    
-                    // Gender
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Gender", systemImage: "person")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        
-                        Picker("Gender", selection: $selectedGender) {
-                            ForEach(UserProfile.Gender.allCases, id: \.self) { gender in
-                                Text(gender.rawValue).tag(gender)
-                            }
                         }
-                        .pickerStyle(.segmented)
-                        .colorScheme(.dark)
+                        
+                        // Height
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Height (cm)", systemImage: "ruler")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            TextField("Enter height", text: $heightCm)
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.plain)
+                                .padding()
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(12)
+                                .foregroundColor(.white)
+                        }
+                        
+                        // Gender
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Gender", systemImage: "person")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Picker("Gender", selection: $selectedGender) {
+                                ForEach(UserProfile.Gender.allCases, id: \.self) { gender in
+                                    Text(gender.rawValue).tag(gender)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .colorScheme(.dark)
+                        }
+                        
+                        // Preferred Unit
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Measurement Unit", systemImage: "ruler.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Picker("Unit", selection: $selectedUnit) {
+                                Text("Centimeters (cm)").tag(MeasureUnit.cm)
+                                Text("Inches (in)").tag(MeasureUnit.inch)
+                            }
+                            .pickerStyle(.segmented)
+                            .colorScheme(.dark)
+                        }
                     }
+                    .padding(.horizontal, 24)
                     
-                    // Info box
+                    // Info box (full width)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
                             Image(systemName: "info.circle")
@@ -93,13 +117,14 @@ struct UserProfileSetupView: View {
                     .padding()
                     .background(Color.blue.opacity(0.1))
                     .cornerRadius(12)
+                    .padding(.horizontal, 16)
                     
                     Spacer(minLength: 40)
                     
                     // Buttons
                     VStack(spacing: 12) {
                         Button(action: saveProfile) {
-                            Text("Continue")
+                            Text(isEditMode ? "Save Changes" : "Continue")
                                 .font(.headline)
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
@@ -109,15 +134,46 @@ struct UserProfileSetupView: View {
                         }
                         .disabled(!isValidInput)
                         
-                        Button(action: skipSetup) {
-                            Text("Skip for now")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
+                        if !isEditMode {
+                            Button(action: skipSetup) {
+                                Text("Skip for now")
+                                    .font(.callout)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
+                    .padding(.horizontal, 24)
                     .padding(.bottom, 40)
                 }
-                .padding(.horizontal, 24)
+            }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if isEditMode {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .foregroundColor(.pink)
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                // Load existing profile values if available
+                let profile = UserProfile.load()
+                if let existingBirthDate = profile.birthDate {
+                    birthDate = existingBirthDate
+                    isEditMode = true
+                }
+                if let existingHeight = profile.heightCm {
+                    heightCm = String(existingHeight)
+                }
+                if let existingGender = profile.gender {
+                    selectedGender = existingGender
+                }
+                if let existingUnit = profile.preferredUnit {
+                    selectedUnit = existingUnit
+                }
             }
         }
     }
@@ -132,6 +188,7 @@ struct UserProfileSetupView: View {
         profile.birthDate = birthDate
         profile.heightCm = Double(heightCm)
         profile.gender = selectedGender
+        profile.preferredUnit = selectedUnit
         profile.save()
         onComplete(profile)
         dismiss()

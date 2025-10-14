@@ -7,9 +7,14 @@ struct ActivityView: View {
     @Environment(\.modelContext) private var ctx
     @Query(sort: \Journey.createdAt, order: .reverse) private var journeys: [Journey]
     @State private var showProfileSetup = false
+    @State private var showProfileDetail = false
     @State private var showYearCalendar = false
     @State private var userProfile = UserProfile.load()
     @StateObject private var healthKit = HealthKitService.shared
+    
+    private var isProfileComplete: Bool {
+        userProfile.birthDate != nil && userProfile.heightCm != nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,24 +49,51 @@ struct ActivityView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 30)
-                .padding(.top, 12)
+                .padding(.top, 4)
             }
         }
         .navigationTitle("Activity")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .sheet(isPresented: $showProfileSetup) {
-                UserProfileSetupView { profile in
-                    userProfile = profile
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Activity")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    if isProfileComplete {
+                        showProfileDetail = true
+                    } else {
+                        showProfileSetup = true
+                    }
+                }) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.pink)
+                }
+            }
+        }
+        .sheet(isPresented: $showProfileSetup) {
+            UserProfileSetupView { profile in
+                userProfile = profile
+            }
+        }
+        .sheet(isPresented: $showProfileDetail) {
+            UserProfileDetailView()
+                .onDisappear {
+                    // Reload profile when detail view is dismissed
+                    userProfile = UserProfile.load()
+                }
         }
         .sheet(isPresented: $showYearCalendar) {
             YearCalendarSheet(journeys: journeys)
         }
         .onAppear {
-            // Show profile setup if not completed
-            if userProfile.birthDate == nil && userProfile.heightCm == nil {
+            // Show profile setup if not completed (only on first launch)
+            if !isProfileComplete {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     showProfileSetup = true
                 }
@@ -156,7 +188,14 @@ struct CombinedWeekAndStreakView: View {
         return VStack(alignment: .leading, spacing: 16) {
             // Week section
             VStack(alignment: .leading, spacing: 14) {
-                Text("My Week").font(.title3.bold()).foregroundColor(.white)
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                        .font(.title3)
+                        .foregroundColor(.pink)
+                    Text("My Week")
+                        .font(.title3.bold())
+                        .foregroundColor(.white)
+                }
                 HStack(spacing: 10) {
                     ForEach(days, id: \.self) { d in
                         EnhancedDayBubble(date: d,
@@ -181,7 +220,7 @@ struct CombinedWeekAndStreakView: View {
                             .foregroundColor(.white)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 
                 HStack(spacing: 8) {
                     Image(systemName: "trophy.fill")
@@ -196,7 +235,7 @@ struct CombinedWeekAndStreakView: View {
                             .foregroundColor(.white)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 4)

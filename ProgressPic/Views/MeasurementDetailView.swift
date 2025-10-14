@@ -854,8 +854,6 @@ struct MeasurementRangeComparison {
             baseRange = (15, 20) // Average male
         case .female:
             baseRange = (23, 28) // Average female
-        case .other:
-            baseRange = (15, 28)
         }
         
         // Adjust for age - body fat tends to increase with age
@@ -888,8 +886,6 @@ struct MeasurementRangeComparison {
             baseRange = (95, 110) // cm
         case .female:
             baseRange = (85, 100) // cm
-        case .other:
-            baseRange = (85, 110)
         }
         
         // Scale based on height (approximately 0.55-0.65 of height)
@@ -907,8 +903,6 @@ struct MeasurementRangeComparison {
             baseRange = (75, 90) // cm
         case .female:
             baseRange = (65, 80) // cm
-        case .other:
-            baseRange = (65, 90)
         }
         
         // Adjust for age - waist tends to increase with age
@@ -943,8 +937,6 @@ struct MeasurementRangeComparison {
             baseRange = (90, 105) // cm
         case .female:
             baseRange = (95, 110) // cm
-        case .other:
-            baseRange = (90, 110)
         }
         
         // Scale based on height
@@ -962,8 +954,6 @@ struct MeasurementRangeComparison {
             baseRange = (30, 38) // cm
         case .female:
             baseRange = (25, 33) // cm
-        case .other:
-            baseRange = (25, 38)
         }
         
         // Adjust for age - muscle mass tends to decrease with age
@@ -995,8 +985,6 @@ struct MeasurementRangeComparison {
             baseRange = (50, 60) // cm
         case .female:
             baseRange = (52, 62) // cm (typically larger due to body composition)
-        case .other:
-            baseRange = (50, 62)
         }
         
         // Scale based on height
@@ -1014,8 +1002,6 @@ struct MeasurementRangeComparison {
             baseRange = (35, 42) // cm
         case .female:
             baseRange = (33, 40) // cm
-        case .other:
-            baseRange = (33, 42)
         }
         
         // Scale based on height
@@ -1033,8 +1019,6 @@ struct MeasurementRangeComparison {
             baseRange = (37, 42) // cm
         case .female:
             baseRange = (32, 36) // cm
-        case .other:
-            baseRange = (32, 42)
         }
         
         // Slight adjustment for age (neck can expand slightly with age)
@@ -1067,8 +1051,6 @@ struct MeasurementRangeComparison {
             baseRange = (26, 32) // cm
         case .female:
             baseRange = (22, 27) // cm
-        case .other:
-            baseRange = (22, 32)
         }
         
         // Adjust for age - muscle mass tends to decrease with age
