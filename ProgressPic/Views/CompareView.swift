@@ -182,7 +182,11 @@ struct PhotoSelectorThumb: View {
                 .foregroundColor(.white.opacity(0.7))
         }
         .task {
-            img = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 240, height: 240))
+            img = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 200, height: 200))
+        }
+        .onDisappear {
+            // Clear image when view disappears to free memory
+            img = nil
         }
     }
 }

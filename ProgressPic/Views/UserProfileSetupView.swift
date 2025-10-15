@@ -23,16 +23,10 @@ struct UserProfileSetupView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         VStack(alignment: .leading, spacing: 24) {
                             // Header
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(isEditMode ? "Edit Your Profile" : "Set Up Your Profile")
-                                    .font(.largeTitle.bold())
-                                    .foregroundColor(.white)
-                                
-                            Text(isEditMode ? "Update your health information" : "Help us provide better health insights by adding your information")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.top, 8)
+                            Text(isEditMode ? "Edit Your Profile" : "Set Up Your Profile")
+                                .font(.largeTitle.bold())
+                                .foregroundColor(.white)
+                                .padding(.top, 24)
                         
                         // Birth Date
                         VStack(alignment: .leading, spacing: 12) {
@@ -118,9 +112,8 @@ struct UserProfileSetupView: View {
                     .background(Color.blue.opacity(0.1))
                     .cornerRadius(12)
                     .padding(.horizontal, 16)
-                    
-                    Spacer(minLength: 40)
-                    
+                    .padding(.bottom, 16)
+
                     // Buttons
                     VStack(spacing: 12) {
                         Button(action: saveProfile) {

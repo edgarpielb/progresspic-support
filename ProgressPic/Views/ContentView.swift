@@ -3,6 +3,7 @@ import SwiftData
 
 struct ContentView: View {
     @State private var selectedTab = 0
+    @StateObject private var cameraService = CameraService()
     @Environment(\.modelContext) private var modelContext
     
     var body: some View {
@@ -15,6 +16,7 @@ struct ContentView: View {
                 .tag(0)
             
             CameraHostView()
+                .environmentObject(cameraService)
                 .tabItem {
                     Image(systemName: "camera.fill")
                     Text("Camera")
@@ -38,7 +40,7 @@ struct ContentView: View {
             Task {
                 await fixOrphanedPhotos()
             }
-            
+
             // Add app-wide memory warning handler
             NotificationCenter.default.addObserver(
                 forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -47,6 +49,12 @@ struct ContentView: View {
             ) { _ in
                 print("⚠️ App-wide memory warning - clearing image cache")
                 PhotoStore.clearCache()
+            }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            // Stop camera when switching away from camera tab to save battery
+            if newTab != 1 {
+                cameraService.stopIfNotNeeded()
             }
         }
     }

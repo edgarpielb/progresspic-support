@@ -41,22 +41,52 @@ enum PhotoStore {
         }
     }
     
+    /// Crop image to 4:5 aspect ratio (1200x1500 optimized)
+    /// This ensures consistent cropping across all photos in the app
+    /// Using smaller dimensions to reduce memory usage while maintaining quality
+    static func cropTo4x5(_ image: UIImage) -> UIImage {
+        let outW: CGFloat = 1200   // 4:5 canvas (optimized for memory)
+        let outH: CGFloat = 1500
+        let canvas = CGSize(width: outW, height: outH)
+
+        // Calculate scale to fill the canvas (use max to ensure crop fills the frame)
+        let baseScale = max(outW / image.size.width, outH / image.size.height)
+
+        let renderer = UIGraphicsImageRenderer(size: canvas)
+        return renderer.image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvas))
+
+            // Center the image
+            ctx.cgContext.translateBy(x: outW/2, y: outH/2)
+            ctx.cgContext.scaleBy(x: baseScale, y: baseScale)
+
+            let drawRect = CGRect(
+                x: -image.size.width/2,
+                y: -image.size.height/2,
+                width: image.size.width,
+                height: image.size.height
+            )
+            image.draw(in: drawRect)
+        }
+    }
+
     static func saveToAppDirectory(_ image: UIImage) async throws -> String {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let photosDirectory = documentsPath.appendingPathComponent("Photos")
-        
+
         // Create Photos directory if it doesn't exist
         try FileManager.default.createDirectory(at: photosDirectory, withIntermediateDirectories: true, attributes: nil)
-        
+
         // Generate unique filename
         let filename = UUID().uuidString + ".jpg"
         let fileURL = photosDirectory.appendingPathComponent(filename)
-        
+
         // Save image as JPEG
         guard let jpegData = image.jpegData(compressionQuality: 0.9) else {
             throw NSError(domain: "PhotoStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not convert image to JPEG"])
         }
-        
+
         try jpegData.write(to: fileURL)
         return filename // Return just the filename, not the full path
     }
@@ -500,14 +530,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         }
     }
 
-    func start() { 
-        guard isAuthorized else { 
+    func start() {
+        guard isAuthorized else {
             print("❌ Camera not authorized - cannot start")
-            return 
+            return
         }
-        
+
         print("🎥 Start called - configuring and starting session...")
-        
+
         // Configure session first if not configured (no inputs)
         if session.inputs.isEmpty {
             print("📹 No inputs - configuring session first")
@@ -520,6 +550,19 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             print("📹 Camera session already running")
             DispatchQueue.main.async {
                 self.updateCaptureReadiness()
+            }
+        }
+    }
+
+    func stopIfNotNeeded() {
+        // Only stop if we're not on camera tab and session is running
+        DispatchQueue.global(qos: .userInitiated).async {
+            if self.session.isRunning {
+                print("⏸️ Stopping camera session - not needed")
+                self.session.stopRunning()
+                DispatchQueue.main.async {
+                    self.canCapture = false
+                }
             }
         }
     }
@@ -741,40 +784,51 @@ enum ReminderManager {
     }
 
     static func schedule(for journey: Journey) {
-        // Cancel all old notifications for this journey
-        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
-            let journeyIds = requests
-                .filter { $0.identifier.hasPrefix(journey.id.uuidString) }
-                .map { $0.identifier }
-            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: journeyIds)
-        }
-        
-        // Schedule notifications for each reminder
-        guard let reminders = journey.reminders else { return }
-        
-        for reminder in reminders {
-            let selectedDays = reminder.selectedDays
-            
-            // Schedule a separate notification for each selected day
-            for day in selectedDays {
-                var dc = DateComponents()
-                dc.hour = reminder.hour
-                dc.minute = reminder.minute
-                dc.weekday = day // 1 = Sunday, 2 = Monday, etc. in Calendar, but we use 1 = Monday
-                
-                // Adjust weekday: our system uses 1=Mon...7=Sun, iOS uses 1=Sun...7=Sat
-                let adjustedWeekday = day == 7 ? 1 : day + 1
-                dc.weekday = adjustedWeekday
-                
-                let content = UNMutableNotificationContent()
-                content.title = reminder.notificationText
-                content.body = "Add today's photo to \(journey.name)."
-                content.sound = .default
-                
-                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-                let id = "\(journey.id.uuidString)-\(reminder.id.uuidString)-\(day)"
-                
-                UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        // Request permission first, then schedule
+        Task {
+            // Request permission when first reminder is being scheduled
+            let granted = await requestPermission()
+
+            guard granted else {
+                print("⚠️ Notification permission not granted")
+                return
+            }
+
+            // Cancel all old notifications for this journey
+            UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+                let journeyIds = requests
+                    .filter { $0.identifier.hasPrefix(journey.id.uuidString) }
+                    .map { $0.identifier }
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: journeyIds)
+            }
+
+            // Schedule notifications for each reminder
+            guard let reminders = journey.reminders else { return }
+
+            for reminder in reminders {
+                let selectedDays = reminder.selectedDays
+
+                // Schedule a separate notification for each selected day
+                for day in selectedDays {
+                    var dc = DateComponents()
+                    dc.hour = reminder.hour
+                    dc.minute = reminder.minute
+                    dc.weekday = day // 1 = Sunday, 2 = Monday, etc. in Calendar, but we use 1 = Monday
+
+                    // Adjust weekday: our system uses 1=Mon...7=Sun, iOS uses 1=Sun...7=Sat
+                    let adjustedWeekday = day == 7 ? 1 : day + 1
+                    dc.weekday = adjustedWeekday
+
+                    let content = UNMutableNotificationContent()
+                    content.title = reminder.notificationText
+                    content.body = "Add today's photo to \(journey.name)."
+                    content.sound = .default
+
+                    let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
+                    let id = "\(journey.id.uuidString)-\(reminder.id.uuidString)-\(day)"
+
+                    try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+                }
             }
         }
     }
@@ -908,10 +962,10 @@ class HealthKitService: ObservableObject {
         guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
             return []
         }
-        
+
         let endDate = Date()
         let startDate: Date
-        
+
         switch timeRange {
         case .week:
             startDate = Calendar.current.date(byAdding: .day, value: -7, to: endDate) ?? endDate
@@ -924,15 +978,18 @@ class HealthKitService: ObservableObject {
         case .all:
             startDate = Calendar.current.date(byAdding: .year, value: -10, to: endDate) ?? endDate
         }
-        
+
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictEndDate)
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
-        
+
+        // Add reasonable limit for large datasets to prevent memory issues
+        let limit = timeRange == .all ? 1000 : HKObjectQueryNoLimit
+
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: quantityType,
                 predicate: predicate,
-                limit: HKObjectQueryNoLimit,
+                limit: limit,
                 sortDescriptors: [sortDescriptor]
             ) { _, samples, error in
                 guard error == nil,
@@ -940,7 +997,7 @@ class HealthKitService: ObservableObject {
                     continuation.resume(returning: [])
                     return
                 }
-                
+
                 let unit: HKUnit
                 switch identifier {
                 case .bodyMass, .leanBodyMass:
@@ -952,7 +1009,7 @@ class HealthKitService: ObservableObject {
                 default:
                     unit = .count()
                 }
-                
+
                 let dataPoints = samples.map { sample in
                     var value = sample.quantity.doubleValue(for: unit)
                     // Convert body fat percentage to percentage (0-100)
@@ -961,10 +1018,10 @@ class HealthKitService: ObservableObject {
                     }
                     return HealthDataPoint(date: sample.endDate, value: value)
                 }
-                
+
                 continuation.resume(returning: dataPoints)
             }
-            
+
             healthStore.execute(query)
         }
     }

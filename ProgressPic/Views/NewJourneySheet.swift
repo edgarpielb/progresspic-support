@@ -14,7 +14,7 @@ struct NewJourneySheet: View {
     @Environment(\.modelContext) private var ctx
 
     @State private var name = ""
-    @State private var saveToCameraRoll = true
+    @State private var saveToCameraRoll = false
     @State private var tempReminders: [TempReminder] = []
     @State private var showEditReminder = false
     @State private var editingReminder: TempReminder? = nil
@@ -178,7 +178,7 @@ struct NewJourneySheet: View {
                             reminder.journey = j
                         }
                         
-                        Task { _ = await ReminderManager.requestPermission(); ReminderManager.schedule(for: j) }
+                        ReminderManager.schedule(for: j)
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")

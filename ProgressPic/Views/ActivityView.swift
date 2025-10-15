@@ -11,6 +11,7 @@ struct ActivityView: View {
     @State private var showYearCalendar = false
     @State private var userProfile = UserProfile.load()
     @StateObject private var healthKit = HealthKitService.shared
+    @State private var isLoadingHealthData = false
     
     private var isProfileComplete: Bool {
         userProfile.birthDate != nil && userProfile.heightCm != nil
@@ -34,7 +35,7 @@ struct ActivityView: View {
                     }
                     .buttonStyle(.plain)
 
-                    BodyCompositionSection(healthKit: healthKit)
+                    BodyCompositionSection(healthKit: healthKit, isLoading: isLoadingHealthData)
                                 .padding(12)
                                 .glassCard()
 
@@ -98,19 +99,23 @@ struct ActivityView: View {
                     showProfileSetup = true
                 }
             }
-            
-            // Check if we should request a review based on current streak
-            let allPhotos = (try? ctx.fetch(FetchDescriptor<ProgressPhoto>(sortBy: [SortDescriptor(\.date, order: .forward)]))) ?? []
-            let allMeasurements = (try? ctx.fetch(FetchDescriptor<MeasurementEntry>(sortBy: [SortDescriptor(\.date, order: .forward)]))) ?? []
-            let currentStreak = calculateCurrentStreak(photos: allPhotos, measurements: allMeasurements)
-            ReviewRequestManager.checkAndRequestReview(currentStreak: currentStreak)
+
+            // Check if we should request a review based on current streak - run on background thread
+            Task {
+                let allPhotos = (try? ctx.fetch(FetchDescriptor<ProgressPhoto>(sortBy: [SortDescriptor(\.date, order: .forward)]))) ?? []
+                let allMeasurements = (try? ctx.fetch(FetchDescriptor<MeasurementEntry>(sortBy: [SortDescriptor(\.date, order: .forward)]))) ?? []
+                let currentStreak = calculateCurrentStreak(photos: allPhotos, measurements: allMeasurements)
+                await MainActor.run {
+                    ReviewRequestManager.checkAndRequestReview(currentStreak: currentStreak)
+                }
+            }
         }
             .task {
-                if !healthKit.isAuthorized {
-                    _ = await healthKit.requestAuthorization()
-                }
+                // Only fetch data if already authorized
                 if healthKit.isAuthorized {
+                    isLoadingHealthData = true
                     await healthKit.fetchBodyComposition()
+                    isLoadingHealthData = false
                 }
             }
         }
@@ -579,7 +584,8 @@ struct MeasurementRow: View {
 
 struct BodyCompositionSection: View {
     @ObservedObject var healthKit: HealthKitService
-    
+    let isLoading: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -592,14 +598,20 @@ struct BodyCompositionSection: View {
                         .foregroundColor(.white)
                 }
                 Spacer()
-                Button(action: {
-                    Task {
-                        await healthKit.fetchBodyComposition()
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.7)
+                } else {
+                    Button(action: {
+                        Task {
+                            await healthKit.fetchBodyComposition()
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title3)
+                            .foregroundStyle(.white)
                     }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.title3)
-                        .foregroundStyle(.white)
                 }
             }
             

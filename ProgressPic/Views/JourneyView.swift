@@ -26,9 +26,14 @@ struct JourneysView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(j.name).font(.title3.bold()).foregroundColor(.white)
                                     let count = j.photos?.count ?? 0
-                                    Text("\(count) photos · Started \(j.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.white.opacity(0.7))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(count) photos")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.white.opacity(0.7))
+                                        Text("Started \(j.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.white.opacity(0.7))
+                                    }
                                 }
                                 Spacer()
                             }
@@ -118,20 +123,24 @@ struct JourneyCoverThumb: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
         .task {
-            // Load the most recent photo
+            // Load the most recent photo with smaller size for cover thumbnails
             if let latestPhoto = photos.first {
-                img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 160, height: 160))
+                img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 120, height: 120))
             }
         }
         .onChange(of: photos.count) { _, _ in
             // Reload when photos change
             Task {
                 if let latestPhoto = photos.first {
-                    img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 160, height: 160))
+                    img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 120, height: 120))
                 } else {
                     img = nil
                 }
             }
+        }
+        .onDisappear {
+            // Clear image when view disappears to free memory
+            img = nil
         }
     }
 }
@@ -154,8 +163,12 @@ struct CoverThumb: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
         .task {
             if let id = localId {
-                img = await PhotoStore.fetchUIImage(localId: id, targetSize: CGSize(width: 160, height: 160))
+                img = await PhotoStore.fetchUIImage(localId: id, targetSize: CGSize(width: 120, height: 120))
             }
+        }
+        .onDisappear {
+            // Clear image when view disappears to free memory
+            img = nil
         }
     }
 }
@@ -166,40 +179,46 @@ struct JourneyDetailView: View {
     let journey: Journey
     @Environment(\.modelContext) private var ctx
     @Environment(\.dismiss) private var dismiss
-    @Query private var photos: [ProgressPhoto]
+    @State private var photos: [ProgressPhoto] = []
+    @State private var isLoadingPhotos = false
+    @State private var currentPage = 0
+    @State private var hasMorePhotos = true
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isImportingPhotos = false
     @State private var selectedPhotoForEdit: ProgressPhoto?
     @State private var showJourneySettings = false
     @State private var showCompareView = false
     @State private var showWatchView = false
-    
+
     init(journey: Journey) {
         self.journey = journey
-        let journeyId = journey.id
-        _photos = Query(filter: #Predicate<ProgressPhoto> { $0.journeyId == journeyId },
-                       sort: \ProgressPhoto.date, order: .reverse)
     }
     
     var body: some View {
         ZStack {
             Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
-            
+
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    // Journey stats
+                    // Journey stats with loading state
                     HStack {
                         VStack(alignment: .leading) {
-                            Text("\(photos.count)")
-                                .font(.title.bold())
-                                .foregroundColor(.white)
+                            if isLoadingPhotos && photos.isEmpty {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Text("\(photos.count)")
+                                    .font(.title.bold())
+                                    .foregroundColor(.white)
+                            }
                             Text("Photos")
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.7))
                         }
-                        
+
                         Spacer()
-                        
+
                         VStack(alignment: .trailing) {
                             Text(journey.createdAt.formatted(date: .abbreviated, time: .omitted))
                                 .font(.title3.bold())
@@ -315,18 +334,71 @@ struct JourneyDetailView: View {
                     .padding(.horizontal)
                     .disabled(isImportingPhotos)
                     
-                    // Photo grid
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                        ForEach(photos) { photo in
-                            Button(action: {
-                                selectedPhotoForEdit = photo
-                            }) {
-                                PhotoGridItem(photo: photo)
+                    // Photo grid with loading states
+                    Group {
+                        if photos.isEmpty && isLoadingPhotos {
+                            // Initial loading state
+                            VStack(spacing: 16) {
+                                Spacer()
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(1.2)
+                                Text("Loading photos...")
+                                    .foregroundColor(.white.opacity(0.7))
+                                Spacer()
                             }
-                            .buttonStyle(.plain)
+                        } else if photos.isEmpty {
+                            // Empty state
+                            VStack(spacing: 16) {
+                                Spacer()
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 64))
+                                    .foregroundColor(.white.opacity(0.3))
+                                Text("No photos yet")
+                                    .font(.title3)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text("Take your first photo to start your journey!")
+                                    .font(.body)
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .multilineTextAlignment(.center)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 40)
+                        } else {
+                            // Photo grid with infinite scroll
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                                ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
+                                    Button(action: {
+                                        selectedPhotoForEdit = photo
+                                    }) {
+                                        PhotoGridItem(photo: photo)
+                                            .onAppear {
+                                                // Load more when reaching near the end
+                                                if index == photos.count - 3 && hasMorePhotos && !isLoadingPhotos {
+                                                    Task {
+                                                        await loadPhotos()
+                                                    }
+                                                }
+                                            }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+
+                                // Loading indicator for infinite scroll
+                                if isLoadingPhotos && hasMorePhotos {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView()
+                                            .tint(.white)
+                                            .scaleEffect(0.8)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 16)
+                                }
+                            }
+                            .padding(.horizontal)
                         }
                     }
-                    .padding(.horizontal)
                     .padding(.bottom, 120)
                 }
                 .padding(.top)
@@ -337,6 +409,18 @@ struct JourneyDetailView: View {
         .navigationBarBackButtonHidden(true)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .task {
+            await loadPhotos()
+        }
+        .onChange(of: journey.id) { _, _ in
+            // Reload photos when journey changes
+            currentPage = 0
+            photos = []
+            hasMorePhotos = true
+            Task {
+                await loadPhotos()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
@@ -393,13 +477,12 @@ struct JourneyDetailView: View {
         for (index, item) in items.enumerated() {
             do {
                 // Load image data from PhotosPickerItem
-                guard let imageData = try await item.loadTransferable(type: Data.self),
-                      let uiImage = UIImage(data: imageData) else {
+                guard let imageData = try await item.loadTransferable(type: Data.self) else {
                     errorCount += 1
                     print("❌ Failed to load image data for item \(index + 1)")
                     continue
                 }
-                
+
                 // Get creation date from metadata if available
                 var creationDate = Date()
                 if let assetIdentifier = item.itemIdentifier {
@@ -408,23 +491,36 @@ struct JourneyDetailView: View {
                         creationDate = asset.creationDate ?? Date()
                     }
                 }
-                
-                // Save to app directory
-                let localId = try await PhotoStore.saveToAppDirectory(uiImage)
-                print("💾 Copied imported photo \(index + 1)/\(items.count) to app directory")
-                
-                // Create progress photo entry
+
+                // Downscale large images to reduce memory usage (max 3000px on longest side)
+                guard let uiImage = downsampleImage(from: imageData, maxDimension: 3000) else {
+                    errorCount += 1
+                    print("❌ Failed to create image from data for item \(index + 1)")
+                    continue
+                }
+
+                // Save original image to app directory
+                let originalId = try await PhotoStore.saveToAppDirectory(uiImage)
+                print("💾 Saved original image \(index + 1)/\(items.count)")
+
+                // Crop to 4:5 and save cropped version
+                let croppedImage = PhotoStore.cropTo4x5(uiImage)
+                let croppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
+                print("✂️ Saved cropped image \(index + 1)/\(items.count)")
+
+                // Create progress photo entry with both IDs
                 await MainActor.run {
                     let progressPhoto = ProgressPhoto(
                         journeyId: journey.id,
                         date: creationDate,
-                        assetLocalId: localId,
+                        assetLocalId: croppedId,
                         isFrontCamera: false,
-                        alignTransform: .identity
+                        alignTransform: .identity,
+                        originalAssetLocalId: originalId
                     )
                     progressPhoto.journey = journey
                     ctx.insert(progressPhoto)
-                    
+
                     // Save context periodically
                     if index % 5 == 0 {
                         do {
@@ -434,10 +530,10 @@ struct JourneyDetailView: View {
                         }
                     }
                 }
-                
+
                 successCount += 1
                 print("✅ Successfully imported photo \(index + 1)/\(items.count)")
-                
+
             } catch {
                 errorCount += 1
                 print("❌ Error importing photo \(index + 1): \(error)")
@@ -452,9 +548,67 @@ struct JourneyDetailView: View {
             } catch {
                 print("❌ Error saving final context: \(error)")
             }
-            
+
             isImportingPhotos = false
             selectedPhotoItems = [] // Clear selection
+        }
+    }
+
+    private func downsampleImage(from imageData: Data, maxDimension: CGFloat) -> UIImage? {
+        let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let imageSource = CGImageSourceCreateWithData(imageData as CFData, imageSourceOptions) else {
+            print("⚠️ Failed to create image source")
+            return nil
+        }
+
+        let downsampleOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ] as CFDictionary
+
+        guard let downsampledImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions) else {
+            print("⚠️ Failed to downsample image, falling back to standard loading")
+            return UIImage(data: imageData)
+        }
+
+        return UIImage(cgImage: downsampledImage)
+    }
+
+    private func loadPhotos() async {
+        guard !isLoadingPhotos && hasMorePhotos else { return }
+
+        await MainActor.run {
+            isLoadingPhotos = true
+        }
+
+        do {
+            let journeyId = journey.id
+            let predicate = #Predicate<ProgressPhoto> { $0.journeyId == journeyId }
+            let sortDescriptors = [SortDescriptor(\ProgressPhoto.date, order: .reverse)]
+
+            let result = try await ctx.fetchPaginated(
+                ProgressPhoto.self,
+                predicate: predicate,
+                sortBy: sortDescriptors,
+                pageSize: 20, // Load 20 photos per page
+                page: currentPage
+            )
+
+            // Append new photos to existing array on main thread
+            await MainActor.run {
+                photos.append(contentsOf: result.items)
+                hasMorePhotos = result.hasMore
+                currentPage += 1
+                isLoadingPhotos = false
+            }
+
+        } catch {
+            print("❌ Error loading photos: \(error)")
+            await MainActor.run {
+                isLoadingPhotos = false
+            }
         }
     }
 }
@@ -535,16 +689,17 @@ struct PhotoGridItem: View {
     private func loadImage() async {
         // Cancel any previous load task
         loadTask?.cancel()
-        
+
         loadTask = Task {
             isLoading = true
             loadFailed = false
-            
-            // Use a reasonable thumbnail size for grid display
-            let targetSize = CGSize(width: 300, height: 300)
-            
+
+            // Use higher quality thumbnails for better grid display
+            // Since we're already storing 1200x1500 cropped images, use them directly
+            let targetSize = CGSize(width: 600, height: 750)
+
             guard !Task.isCancelled else { return }
-            
+
             if let loadedImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize) {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -837,13 +992,25 @@ struct ImagePicker: UIViewControllerRepresentable {
         var config = PHPickerConfiguration()
         config.filter = .images
         config.selectionLimit = 0 // Allow multiple selection
-        
+        config.selection = .ordered // This might help with selection appearance
+
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
+
         return picker
     }
-    
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
+        // Set tint color after the view hierarchy is established
+        DispatchQueue.main.async {
+            uiViewController.view.tintColor = UIColor.cyan
+            if let navigationBar = uiViewController.navigationController?.navigationBar {
+                navigationBar.tintColor = UIColor.cyan
+            }
+            // Try to set tint on the presented view controller itself
+            uiViewController.view.window?.tintColor = UIColor.cyan
+        }
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -958,7 +1125,8 @@ struct PhotoEditSheet: View {
                             .foregroundColor(AppStyle.Colors.textSecondary)
                     }
                     .padding(.top, AppStyle.Spacing.md)
-                    
+                    .padding(.bottom, AppStyle.Spacing.xl)
+
                     // Main image with 4:5 aspect ratio (already cropped to 4:5)
                     if let img = image {
                         Image(uiImage: img)
@@ -1582,8 +1750,11 @@ struct PhotoAdjustSheet: View {
     }
 
     private func loadImage() async {
-        image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: nil)
-        
+        // Load the original uncropped image if available, otherwise use the cropped version
+        let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+        image = await PhotoStore.fetchUIImage(localId: imageId, targetSize: nil)
+        print("📸 Loaded \(photo.originalAssetLocalId != nil ? "original" : "cropped") image for adjustment")
+
         // Apply saved transform if it exists
         await MainActor.run {
             let transform = photo.alignTransform
@@ -1715,30 +1886,80 @@ struct PhotoAdjustSheet: View {
     }
 
     private func saveEdits() async {
-        guard image != nil else { return }
+        guard let img = image else { return }
         isSaving = true
 
-        // Save the transform without creating a new image
-        // This keeps the original image and allows re-editing with full zoom out
-        await MainActor.run {
-            do {
+        // Generate a new cropped 4:5 image with the current transform applied
+        let croppedImage = renderCroppedImage(from: img)
+
+        do {
+            // Save the new cropped image
+            let newCroppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
+            print("✂️ Saved new cropped image")
+
+            // Update the photo record with the new cropped ID and transform
+            await MainActor.run {
+                // Delete the old cropped image if it exists
+                if !photo.assetLocalId.isEmpty {
+                    Task {
+                        try? await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
+                    }
+                }
+
+                photo.assetLocalId = newCroppedId
                 photo.alignTransform = AlignTransform(
                     scale: scale,
                     offsetX: offset.width,
                     offsetY: offset.height,
                     rotation: rotation.radians
                 )
-                
-                try ctx.save()
-                print("✅ Photo transform saved: scale=\(scale), offset=(\(offset.width), \(offset.height)), rotation=\(rotation.radians)")
-                isSaving = false
-                dismiss()
-            } catch {
-                print("❌ Error saving photo transform: \(error)")
-                errorMessage = "Failed to save edits: \(error.localizedDescription)"
+
+                do {
+                    try ctx.save()
+                    print("✅ Photo updated with new crop: scale=\(scale), offset=(\(offset.width), \(offset.height)), rotation=\(rotation.radians)")
+                    isSaving = false
+                    dismiss()
+                } catch {
+                    print("❌ Error saving photo: \(error)")
+                    errorMessage = "Failed to save edits: \(error.localizedDescription)"
+                    showErrorAlert = true
+                    isSaving = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                print("❌ Error saving cropped image: \(error)")
+                errorMessage = "Failed to save cropped image: \(error.localizedDescription)"
                 showErrorAlert = true
                 isSaving = false
             }
+        }
+    }
+
+    private func renderCroppedImage(from sourceImage: UIImage) -> UIImage {
+        let outW: CGFloat = 1200   // 4:5 canvas (optimized for memory)
+        let outH: CGFloat = 1500
+        let canvas = CGSize(width: outW, height: outH)
+
+        let baseScale = min(outW / sourceImage.size.width, outH / sourceImage.size.height)
+        let finalScale = baseScale * max(scale, 0.001)
+
+        let renderer = UIGraphicsImageRenderer(size: canvas)
+        return renderer.image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvas))
+
+            ctx.cgContext.translateBy(x: outW/2 + offset.width * baseScale, y: outH/2 + offset.height * baseScale)
+            ctx.cgContext.rotate(by: rotation.radians)
+            ctx.cgContext.scaleBy(x: finalScale, y: finalScale)
+
+            let drawRect = CGRect(
+                x: -sourceImage.size.width/2,
+                y: -sourceImage.size.height/2,
+                width: sourceImage.size.width,
+                height: sourceImage.size.height
+            )
+            sourceImage.draw(in: drawRect)
         }
     }
     

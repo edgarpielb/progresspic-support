@@ -581,8 +581,7 @@ struct MeasurementDetailView: View {
     
     private func aggregateEntriesByWeek(_ entries: [MeasurementEntry]) -> [MeasurementEntry] {
         guard !entries.isEmpty else { return [] }
-        guard let firstEntry = entries.first else { return [] }
-        
+
         let calendar = Calendar.current
         var weeklyData: [Date: (values: [Double], journeyId: UUID, type: MeasurementType)] = [:]
         
@@ -622,8 +621,7 @@ struct MeasurementDetailView: View {
     
     private func aggregateEntriesByMonth(_ entries: [MeasurementEntry]) -> [MeasurementEntry] {
         guard !entries.isEmpty else { return [] }
-        guard let firstEntry = entries.first else { return [] }
-        
+
         let calendar = Calendar.current
         var monthlyData: [Date: (values: [Double], journeyId: UUID, type: MeasurementType)] = [:]
         
@@ -663,8 +661,7 @@ struct MeasurementDetailView: View {
     
     private func aggregateEntriesByQuarter(_ entries: [MeasurementEntry]) -> [MeasurementEntry] {
         guard !entries.isEmpty else { return [] }
-        guard let firstEntry = entries.first else { return [] }
-        
+
         let calendar = Calendar.current
         var quarterlyData: [Date: (values: [Double], journeyId: UUID, type: MeasurementType)] = [:]
         

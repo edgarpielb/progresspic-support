@@ -4,7 +4,7 @@ struct AdjustView: View {
     let captured: UIImage
     let ghost: UIImage?
     let saveToCameraRoll: Bool
-    var onSave: (_ savedLocalId: String, _ transform: AlignTransform) -> Void
+    var onSave: (_ savedLocalId: String, _ transform: AlignTransform, _ originalLocalId: String) -> Void
 
     @State private var scale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -90,8 +90,8 @@ struct AdjustView: View {
 
     // Render to strict 4:5 based on current transform
     func makeCroppedImage() -> UIImage {
-        let outW: CGFloat = 2000   // 4:5 canvas (high-res)
-        let outH: CGFloat = 2500
+        let outW: CGFloat = 1200   // 4:5 canvas (optimized for memory)
+        let outH: CGFloat = 1500
         let canvas = CGSize(width: outW, height: outH)
 
         let baseScale = min(outW / captured.size.width, outH / captured.size.height)
@@ -117,10 +117,17 @@ struct AdjustView: View {
     }
 
     func save() async {
+        // Save original image first
+        guard let originalId = try? await PhotoStore.saveToAppDirectory(captured) else { return }
+        print("💾 Saved original image")
+
+        // Save cropped image
         let cropped = makeCroppedImage()
         guard let localId = try? await PhotoStore.saveToAppDirectoryAndLibrary(cropped, saveToCameraRoll: saveToCameraRoll) else { return }
+        print("✂️ Saved cropped image")
+
         let transform = AlignTransform(scale: scale, offsetX: offset.width, offsetY: offset.height, rotation: rotation.radians)
-        onSave(localId, transform)
+        onSave(localId, transform, originalId)
         dismiss()
     }
 }

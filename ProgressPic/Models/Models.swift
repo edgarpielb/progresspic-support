@@ -38,7 +38,7 @@ final class Journey {
     var name: String = ""
     var createdAt: Date = Date.now
     var coverAssetLocalId: String? = nil   // PHAsset localIdentifier
-    var saveToCameraRoll: Bool = true
+    var saveToCameraRoll: Bool = false
     var template: String? = nil
 
     @Relationship(deleteRule: .cascade, inverse: \ProgressPhoto.journey) var photos: [ProgressPhoto]? = []
@@ -47,7 +47,7 @@ final class Journey {
 
     init(name: String,
          createdAt: Date = .now,
-         saveToCameraRoll: Bool = true,
+         saveToCameraRoll: Bool = false,
          template: String? = nil) {
         self.id = UUID()
         self.name = name
@@ -62,19 +62,21 @@ final class ProgressPhoto {
     var id: UUID = UUID()
     var journeyId: UUID = UUID()        // denormalized for convenience
     var date: Date = Date.now
-    var assetLocalId: String = ""   // PHAsset localIdentifier
+    var assetLocalId: String = ""   // PHAsset localIdentifier - stores the cropped image
+    var originalAssetLocalId: String? = nil  // Stores the original uncropped image for re-cropping
     var isFrontCamera: Bool = true
     var alignTransform: AlignTransform = AlignTransform.identity  // saved transform
     var notes: String? = nil  // User notes attached to photo
     var isHidden: Bool = false  // Hide from Watch/Compare
-    
+
     var journey: Journey? = nil
 
-    init(journeyId: UUID, date: Date, assetLocalId: String, isFrontCamera: Bool, alignTransform: AlignTransform = .identity, notes: String? = nil, isHidden: Bool = false) {
+    init(journeyId: UUID, date: Date, assetLocalId: String, isFrontCamera: Bool, alignTransform: AlignTransform = .identity, notes: String? = nil, isHidden: Bool = false, originalAssetLocalId: String? = nil) {
         self.id = UUID()
         self.journeyId = journeyId
         self.date = date
         self.assetLocalId = assetLocalId
+        self.originalAssetLocalId = originalAssetLocalId
         self.isFrontCamera = isFrontCamera
         self.alignTransform = alignTransform
         self.notes = notes
@@ -195,6 +197,61 @@ struct AlignTransform: Codable, Hashable {
     var rotation: Double  // radians
 
     static let identity = AlignTransform(scale: 1, offsetX: 0, offsetY: 0, rotation: 0)
+}
+
+// MARK: - Pagination Helper
+struct PaginatedQuery<T> {
+    let items: [T]
+    let hasMore: Bool
+    let totalCount: Int?
+
+    init(items: [T], hasMore: Bool, totalCount: Int? = nil) {
+        self.items = items
+        self.hasMore = hasMore
+        self.totalCount = totalCount
+    }
+}
+
+// Helper for paginated SwiftData queries
+extension ModelContext {
+    func fetchPaginated<T: PersistentModel>(
+        _ type: T.Type,
+        predicate: Predicate<T>? = nil,
+        sortBy sortDescriptors: [SortDescriptor<T>] = [],
+        pageSize: Int = 50,
+        page: Int = 0
+    ) async throws -> PaginatedQuery<T> {
+        let fetchDescriptor = FetchDescriptor<T>(
+            predicate: predicate,
+            sortBy: sortDescriptors
+        )
+
+        // Set range for pagination
+        let startIndex = page * pageSize
+        let endIndex = startIndex + pageSize
+
+        // First get total count (expensive, so we cache it)
+        let totalCount: Int?
+        if let predicate = predicate {
+            let countDescriptor = FetchDescriptor<T>(predicate: predicate)
+            totalCount = try fetchCount(countDescriptor)
+        } else {
+            totalCount = try fetchCount(FetchDescriptor<T>())
+        }
+
+        // Fetch the page
+        var mutableDescriptor = fetchDescriptor
+        mutableDescriptor.fetchOffset = startIndex
+        mutableDescriptor.fetchLimit = pageSize
+
+        let items = try fetch(mutableDescriptor)
+
+        return PaginatedQuery(
+            items: items,
+            hasMore: (totalCount ?? 0) > endIndex,
+            totalCount: totalCount
+        )
+    }
 }
 
 // User Profile for health comparisons

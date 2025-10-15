@@ -3,7 +3,7 @@ import SwiftData
 import AVFoundation
 
 struct CameraHostView: View {
-    @StateObject private var camera = CameraService()
+    @EnvironmentObject private var camera: CameraService
     @Environment(\.modelContext) private var ctx
     @Query(sort: \Journey.createdAt, order: .reverse) private var journeys: [Journey]
 
@@ -309,9 +309,8 @@ struct CameraHostView: View {
                     print("▶️ Starting/Restarting camera session...")
                     camera.start()
                 }
-                
-                // Request photo library access and load images (first time only)
-                _ = await PhotoStore.requestAuthorization()
+
+                // Load thumbnails (no permission needed for app directory)
                 startLoadingGhost()
                 await loadLatestThumbnail()
             }
@@ -353,25 +352,29 @@ struct CameraHostView: View {
             }
         }
         .onDisappear {
-            print("👋 CameraHostView disappeared")
-            
+            print("👋 CameraHostView disappeared - clearing resources")
+
+            // Cancel any ongoing ghost load
+            ghostLoadTask?.cancel()
+            ghostLoadTask = nil
+
+            // Clear large images to free memory
+            lastGhost = nil
+            latestPhotoThumbnail = nil
+
             // Remove orientation observer
             if let observer = orientationObserver {
                 NotificationCenter.default.removeObserver(observer)
                 orientationObserver = nil
             }
-            
+
             // Remove background observer
             if let observer = backgroundObserver {
                 NotificationCenter.default.removeObserver(observer)
                 backgroundObserver = nil
             }
-            
-            // Cancel any ongoing ghost load
-            ghostLoadTask?.cancel()
-            
-            // Stop camera session (but don't clean up preview layer)
-            // This allows quick restart when returning to this view
+
+            // Stop camera session when leaving camera view
             camera.stop()
         }
         .onChange(of: camera.isAuthorized) { _, ok in
@@ -398,10 +401,10 @@ struct CameraHostView: View {
         }
         .sheet(isPresented: $showAdjust) {
             if let latest = camera.latestPhoto {
-                AdjustView(captured: latest, ghost: lastGhost, saveToCameraRoll: selectedJourney?.saveToCameraRoll ?? false, onSave: { savedId, transform in
+                AdjustView(captured: latest, ghost: lastGhost, saveToCameraRoll: selectedJourney?.saveToCameraRoll ?? false, onSave: { savedId, transform, originalId in
                     if let journey = selectedJourney {
                         let date = PhotoStore.creationDate(for: savedId) ?? Date()
-                        let p = ProgressPhoto(journeyId: journey.id, date: date, assetLocalId: savedId, isFrontCamera: camera.isFront, alignTransform: transform)
+                        let p = ProgressPhoto(journeyId: journey.id, date: date, assetLocalId: savedId, isFrontCamera: camera.isFront, alignTransform: transform, originalAssetLocalId: originalId)
                         p.journey = journey  // Set the relationship
                         ctx.insert(p)
                         if journey.coverAssetLocalId == nil { journey.coverAssetLocalId = savedId }
