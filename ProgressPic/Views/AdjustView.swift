@@ -7,9 +7,14 @@ struct AdjustView: View {
     var onSave: (_ savedLocalId: String, _ transform: AlignTransform, _ originalLocalId: String) -> Void
 
     @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var rotation: Angle = .zero
     @State private var opacity: Double = 0.5
+    @State private var minScale: CGFloat = 1
+    @State private var hasCalculatedInitialScale = false
+    @State private var showGhost = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -17,75 +22,221 @@ struct AdjustView: View {
             ZStack {
                 Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
 
-                if let g = ghost {
-                    Image(uiImage: g)
-                        .resizable()
-                        .scaledToFit()
-                        .opacity(opacity)
-                        .blendMode(.plusLighter)
-                }
+                GeometryReader { geo in
+                    let cropW = geo.size.width
+                    let cropH = cropW * 5/4
 
-                Image(uiImage: captured)
-                    .resizable()
-                    .scaledToFit()
-                    .scaleEffect(scale)
-                    .rotationEffect(rotation)
-                    .offset(offset)
-                    .gesture(dragZoomRotate)
-                    .animation(.snappy, value: scale)
-                    .animation(.snappy, value: offset)
-                    .animation(.snappy, value: rotation)
+                    ZStack {
+                        // Full image layer (dimmed, for context)
+                        Image(uiImage: captured)
+                            .resizable()
+                            .scaledToFit()
+                            .scaleEffect(scale)
+                            .offset(offset)
+                            .rotationEffect(rotation)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .opacity(0.3)
+                            .blur(radius: 3)
+                            .allowsHitTesting(false)
+
+                        // Light overlay everywhere EXCEPT the crop area (matches bottom bar translucency)
+                        Rectangle()
+                            .fill(Color.black.opacity(0.35))
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .mask(
+                                ZStack {
+                                    Rectangle()
+                                        .fill(Color.white)
+                                    RoundedRectangle(cornerRadius: 18)
+                                        .fill(Color.black)
+                                        .frame(width: cropW, height: cropH)
+                                        .position(x: geo.size.width/2, y: geo.size.height/2)
+                                        .blendMode(.destinationOut)
+                                }
+                                .compositingGroup()
+                            )
+                            .allowsHitTesting(false)
+
+                        // Bright crop area with main image + ghost overlay on top
+                        ZStack {
+                            // Main image being edited (below) - fade out as ghost opacity increases
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(width: cropW, height: cropH)
+                                .overlay(
+                                    Image(uiImage: captured)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .scaleEffect(scale)
+                                        .offset(offset)
+                                        .rotationEffect(rotation)
+                                        .opacity(showGhost ? (1 - opacity) : 1)
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                                .position(x: cropW/2, y: geo.size.height/2)
+
+                            // Ghost overlay (on top, if enabled)
+                            if showGhost, let g = ghost {
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: cropW, height: cropH)
+                                    .overlay(
+                                        Image(uiImage: g)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .opacity(opacity)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    .position(x: cropW/2, y: geo.size.height/2)
+                                    .allowsHitTesting(false)
+                            }
+
+                            // Border and shadow on top of everything
+                            Rectangle()
+                                .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                                .frame(width: cropW, height: cropH)
+                                .position(x: cropW/2, y: geo.size.height/2)
+                                .allowsHitTesting(false)
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .position(x: geo.size.width/2, y: geo.size.height/2)
+                        .gesture(
+                            SimultaneousGesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        offset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { _ in
+                                        lastOffset = offset
+                                    },
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        let newScale = lastScale * value
+                                        scale = max(minScale, newScale)
+                                    }
+                                    .onEnded { _ in
+                                        lastScale = scale
+                                    }
+                            )
+                        )
+                        .gesture(
+                            RotationGesture().onChanged { rotation = $0 }
+                        )
+                    }
+                    .onChange(of: geo.size) { _, newSize in
+                        // Recalculate scale when geometry changes (e.g., rotation)
+                        if hasCalculatedInitialScale {
+                            calculateInitialScale(imageSize: captured.size, cropSize: CGSize(width: newSize.width, height: newSize.width * 5/4))
+                        }
+                    }
+                    .task {
+                        // Calculate initial scale when image loads
+                        if !hasCalculatedInitialScale {
+                            calculateInitialScale(imageSize: captured.size, cropSize: CGSize(width: cropW, height: cropH))
+                            hasCalculatedInitialScale = true
+                        }
+                    }
+                }
             }
+            .navigationTitle("Edit Photo")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.visible, for: .navigationBar, .bottomBar)
+            .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { 
+                ToolbarItem(placement: .topBarLeading) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
                             .foregroundColor(.white)
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) { 
-                    Button(action: { Task { await save() } }) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        Task { await save() }
+                    }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.cyan)
+                            .font(.body.weight(.semibold))
                     }
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 14) {
+                VStack(spacing: 12) {
+                    // Ghost Overlay controls
                     if ghost != nil {
-                        HStack {
-                            Text("Ghost").font(.subheadline.bold())
-                            Slider(value: $opacity, in: 0...1)
-                        }.padding(.horizontal)
+                        HStack(spacing: 16) {
+                            Button(action: { showGhost.toggle() }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: showGhost ? "eye.fill" : "eye.slash.fill")
+                                    Text("Ghost Overlay")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .foregroundColor(showGhost ? .cyan : .white.opacity(0.7))
+                            }
+
+                            Spacer()
+                        }
+
+                        // Slider
+                        if showGhost {
+                            HStack {
+                                Image(systemName: "circle.lefthalf.filled")
+                                    .foregroundColor(.white.opacity(0.7))
+                                Slider(value: $opacity, in: 0...1)
+                                    .tint(.cyan)
+                                Text("\(Int(opacity * 100))%")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 40)
+                            }
+                        }
                     }
-                    HStack {
-                        Button("Revert") { scale = 1; offset = .zero; rotation = .zero }
-                        Spacer()
-                        Button("Undo") { /* reserved */ }
-                    }
-                    .font(.callout)
-                    .padding(.horizontal)
-                    .padding(.bottom, 14)
                 }
+                .padding(.horizontal)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity)
                 .background(
                     ZStack {
                         Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
                         Rectangle()
                             .fill(.ultraThinMaterial)
                     }
+                    .ignoresSafeArea(edges: .bottom)
                 )
             }
         }
     }
 
-    var dragZoomRotate: some Gesture {
-        SimultaneousGesture(
-            SimultaneousGesture(
-                DragGesture().onChanged { offset = $0.translation },
-                MagnificationGesture().onChanged { scale = $0 }
-            ),
-            RotationGesture().onChanged { rotation = $0 }
-        )
+    private func calculateInitialScale(imageSize: CGSize, cropSize: CGSize) {
+        // Image will be .scaledToFit() within the crop area
+        // Then we apply scaleEffect to zoom it to fill
+
+        let imageAspect = imageSize.width / imageSize.height
+        let cropAspect = cropSize.width / cropSize.height  // 4:5 = 0.8
+
+        // ScaledToFit will constrain by the limiting dimension
+        // To fill, we need to scale by the ratio of the crop aspect to image aspect
+        let fillScale: CGFloat
+        if imageAspect > cropAspect {
+            // Image is wider than crop - fits by width, needs to scale by height ratio
+            fillScale = imageAspect / cropAspect
+        } else {
+            // Image is taller than crop - fits by height, needs to scale by width ratio
+            fillScale = cropAspect / imageAspect
+        }
+
+        // Always update minScale to the fill scale
+        minScale = fillScale
+
+        // Only set initial scale if we haven't loaded a saved transform
+        if !hasCalculatedInitialScale {
+            scale = fillScale
+            lastScale = fillScale
+        }
     }
 
     // Render to strict 4:5 based on current transform
@@ -102,7 +253,7 @@ struct AdjustView: View {
             UIColor.black.setFill()
             ctx.fill(CGRect(origin: .zero, size: canvas))
 
-            ctx.cgContext.translateBy(x: outW/2 + offset.width, y: outH/2 + offset.height)
+            ctx.cgContext.translateBy(x: outW/2 + offset.width * baseScale, y: outH/2 + offset.height * baseScale)
             ctx.cgContext.rotate(by: rotation.radians)
             ctx.cgContext.scaleBy(x: finalScale, y: finalScale)
 

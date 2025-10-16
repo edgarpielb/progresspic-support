@@ -165,7 +165,7 @@ struct NewJourneySheet: View {
                         let j = Journey(name: name.isEmpty ? "My Journey" : name,
                                         saveToCameraRoll: saveToCameraRoll)
                         ctx.insert(j)
-                        
+
                         // Add reminders to the journey
                         for tempReminder in tempReminders {
                             let reminder = JourneyReminder(
@@ -177,9 +177,18 @@ struct NewJourneySheet: View {
                             ctx.insert(reminder)
                             reminder.journey = j
                         }
-                        
-                        ReminderManager.schedule(for: j)
-                        dismiss()
+
+                        // Save the context immediately to persist the journey
+                        do {
+                            try ctx.save()
+                            print("✅ Journey '\(j.name)' created and saved successfully")
+                            ReminderManager.schedule(for: j)
+                            dismiss()
+                        } catch {
+                            print("❌ Error saving new journey: \(error)")
+                            // Remove the journey if save fails
+                            ctx.delete(j)
+                        }
                     }) {
                         Image(systemName: "checkmark")
                             .foregroundColor(.blue)

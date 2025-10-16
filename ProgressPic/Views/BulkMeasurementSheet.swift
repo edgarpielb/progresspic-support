@@ -31,6 +31,13 @@ struct BulkMeasurementSheet: View {
                 Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
                 
                 Form {
+                    Section {
+                        Text("For detailed instructions on how to take each measurement, go back and tap on the specific body part.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    
                     Section("Date") {
                         DatePicker("When", selection: $date, displayedComponents: [.date, .hourAndMinute])
                         

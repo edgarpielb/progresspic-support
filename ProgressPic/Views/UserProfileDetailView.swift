@@ -101,10 +101,12 @@ struct UserProfileDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button(action: {
                         dismiss()
+                    }) {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.pink)
                     }
-                    .foregroundColor(.pink)
                 }
             }
             .sheet(isPresented: $showEditSheet) {

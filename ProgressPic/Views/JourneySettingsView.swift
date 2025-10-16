@@ -300,8 +300,25 @@ struct JourneySettingsView: View {
     }
     
     private func deleteJourney() {
+        // Delete the journey from the context
         ctx.delete(journey)
-        try? ctx.save()
+
+        // Process pending changes to ensure deletion is registered
+        // This is critical for SwiftData to properly update its internal state
+        ctx.processPendingChanges()
+
+        // Force save and process changes immediately
+        do {
+            try ctx.save()
+            print("✅ Journey '\(journey.name)' deleted and saved successfully")
+
+            // Process changes again after save to ensure persistent store is updated
+            ctx.processPendingChanges()
+        } catch {
+            print("❌ Error saving after journey deletion: \(error)")
+        }
+
+        // Notify parent view that journey was deleted
         onJourneyDeleted?(true)
         dismiss()
     }

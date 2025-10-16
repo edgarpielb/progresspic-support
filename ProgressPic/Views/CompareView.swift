@@ -20,6 +20,14 @@ struct CompareView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
+                // Title
+                Text("Compare Photos")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+                    .padding(.bottom, 20)
+
                 // Mode picker at the top - add top safe area padding manually
                 Picker("", selection: $mode) {
                     Text("Parallel").tag(Mode.parallel)
@@ -28,7 +36,6 @@ struct CompareView: View {
                 .pickerStyle(.segmented)
                 .tint(.white)
                 .padding(.horizontal)
-                .padding(.top, 80) // Manual safe area compensation - increased spacing
                 
                 // Journey selector
                 Menu {
@@ -394,27 +401,27 @@ struct CompareCanvas: View {
                     GeometryReader { geo in
                         let w = max(1, geo.size.width)
                         let cut = w * sliderX
-                        
+
                         ZStack(alignment: .leading) {
                             // Left image (base layer - always visible)
                             Image(uiImage: l)
                                 .resizable()
-                                .scaledToFit()
-                                .frame(width: w)
+                                .scaledToFill()
+                                .frame(width: w, height: geo.size.height)
                                 .clipped()
-                            
+
                             // Right image (overlay - masked to show only the right portion)
                             Image(uiImage: r)
                                 .resizable()
-                                .scaledToFit()
-                                .frame(width: w)
+                                .scaledToFill()
+                                .frame(width: w, height: geo.size.height)
                                 .clipped()
                                 .mask(alignment: .leading) {
                                     Rectangle()
                                         .frame(width: w - cut)
                                         .offset(x: cut)
                                 }
-                            
+
                             // Slider handle with line
                             ZStack {
                                 // Vertical line
@@ -422,7 +429,7 @@ struct CompareCanvas: View {
                                     .fill(.white)
                                     .frame(width: 3)
                                     .shadow(color: .black.opacity(0.5), radius: 2)
-                                
+
                                 // Handle circle
                                 Circle()
                                     .fill(.white)
@@ -437,10 +444,11 @@ struct CompareCanvas: View {
                             }
                             .frame(width: 3)
                             .offset(x: cut - 1.5) // Center the line on the cut position
+                            .allowsHitTesting(false) // Let touches pass through to the gesture
                         }
                         .frame(width: w, height: geo.size.height)
-                        .contentShape(Rectangle())
-                        .gesture(
+                        .contentShape(Rectangle()) // Make entire area tappable
+                        .simultaneousGesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { v in
                                     let x = min(max(v.location.x, 0), w)

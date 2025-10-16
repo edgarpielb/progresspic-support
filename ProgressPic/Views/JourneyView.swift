@@ -448,7 +448,10 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $selectedPhotoForEdit) { photo in
-            PhotoEditSheet(photo: photo, allPhotos: photos)
+            PhotoEditSheet(photo: photo, allPhotos: photos) { deletedPhoto in
+                // Remove the deleted photo from the local array to update UI immediately
+                photos.removeAll { $0.id == deletedPhoto.id }
+            }
         }
         .sheet(isPresented: $showJourneySettings) {
             JourneySettingsView(journey: journey, onJourneyDeleted: { journeyWasDeleted in
@@ -487,9 +490,14 @@ struct JourneyDetailView: View {
                 var creationDate = Date()
                 if let assetIdentifier = item.itemIdentifier {
                     let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
-                    if let asset = fetchResult.firstObject {
-                        creationDate = asset.creationDate ?? Date()
+                    if let asset = fetchResult.firstObject, let originalDate = asset.creationDate {
+                        creationDate = originalDate
+                        print("📅 Using original photo date: \(originalDate.formatted())")
+                    } else {
+                        print("⚠️ Could not retrieve original date for photo \(index + 1), using current date")
                     }
+                } else {
+                    print("⚠️ No asset identifier for photo \(index + 1), using current date")
                 }
 
                 // Downscale large images to reduce memory usage (max 3000px on longest side)
@@ -545,6 +553,14 @@ struct JourneyDetailView: View {
             do {
                 try ctx.save()
                 print("📸 Import complete: \(successCount) success, \(errorCount) errors")
+
+                // Process pending changes to ensure photos are properly registered
+                ctx.processPendingChanges()
+
+                // Reset pagination and reload photos to show new imports immediately
+                currentPage = 0
+                photos = []
+                hasMorePhotos = true
             } catch {
                 print("❌ Error saving final context: \(error)")
             }
@@ -552,6 +568,9 @@ struct JourneyDetailView: View {
             isImportingPhotos = false
             selectedPhotoItems = [] // Clear selection
         }
+
+        // Reload photos after import to immediately show them in the UI
+        await loadPhotos()
     }
 
     private func downsampleImage(from imageData: Data, maxDimension: CGFloat) -> UIImage? {
@@ -677,7 +696,8 @@ struct PhotoGridItem: View {
             )
         }
         .aspectRatio(4.0/5.0, contentMode: .fit) // 4:5 ratio to match edit view crop
-        .task(id: photo.id) {
+        .task(id: photo.assetLocalId) {
+            // Reload when assetLocalId changes (e.g., after recropping)
             await loadImage()
         }
         .onDisappear {
@@ -1092,7 +1112,8 @@ struct PhotoEditSheet: View {
     
     let photo: ProgressPhoto
     let allPhotos: [ProgressPhoto]  // For navigation
-    
+    let onPhotoDeleted: ((ProgressPhoto) -> Void)?  // Callback when photo is deleted
+
     @State private var currentPhoto: ProgressPhoto
     @State private var image: UIImage?
     @State private var showNotesEditor = false
@@ -1102,9 +1123,10 @@ struct PhotoEditSheet: View {
     @State private var notesText: String = ""
     @State private var selectedDate: Date = Date()
     
-    init(photo: ProgressPhoto, allPhotos: [ProgressPhoto] = []) {
+    init(photo: ProgressPhoto, allPhotos: [ProgressPhoto] = [], onPhotoDeleted: ((ProgressPhoto) -> Void)? = nil) {
         self.photo = photo
         self.allPhotos = allPhotos.isEmpty ? [photo] : allPhotos
+        self.onPhotoDeleted = onPhotoDeleted
         _currentPhoto = State(initialValue: photo)
     }
     
@@ -1496,14 +1518,18 @@ struct PhotoEditSheet: View {
     }
     
     private func deletePhoto() {
+        let photoToDelete = currentPhoto
         ctx.delete(currentPhoto)
         try? ctx.save()
-        
+
         // Delete file
         Task {
-            try? await PhotoStore.deleteFromAppDirectory(localId: currentPhoto.assetLocalId)
+            try? await PhotoStore.deleteFromAppDirectory(localId: photoToDelete.assetLocalId)
         }
-        
+
+        // Notify parent view that photo was deleted
+        onPhotoDeleted?(photoToDelete)
+
         dismiss()
     }
 }
@@ -1897,26 +1923,28 @@ struct PhotoAdjustSheet: View {
             let newCroppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
             print("✂️ Saved new cropped image")
 
-            // Update the photo record with the new cropped ID and transform
+            // Update the photo record with the new cropped ID
             await MainActor.run {
-                // Delete the old cropped image if it exists
-                if !photo.assetLocalId.isEmpty {
-                    Task {
-                        try? await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
-                    }
-                }
+                let oldCroppedId = photo.assetLocalId
 
+                // Update to new cropped image
                 photo.assetLocalId = newCroppedId
-                photo.alignTransform = AlignTransform(
-                    scale: scale,
-                    offsetX: offset.width,
-                    offsetY: offset.height,
-                    rotation: rotation.radians
-                )
+
+                // Reset transform to identity since we baked it into the new cropped image
+                photo.alignTransform = .identity
 
                 do {
                     try ctx.save()
-                    print("✅ Photo updated with new crop: scale=\(scale), offset=(\(offset.width), \(offset.height)), rotation=\(rotation.radians)")
+                    print("✅ Photo updated with new crop")
+
+                    // Clean up old cropped file after successful save
+                    if !oldCroppedId.isEmpty {
+                        Task {
+                            try? await PhotoStore.deleteFromAppDirectory(localId: oldCroppedId)
+                            print("🗑️ Deleted old cropped image")
+                        }
+                    }
+
                     isSaving = false
                     dismiss()
                 } catch {
@@ -1970,27 +1998,13 @@ struct JourneyCompareSheet: View {
     let journey: Journey
     let photos: [ProgressPhoto]
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255)
-                    .ignoresSafeArea()
-                
-                JourneyCompareView(journey: journey, photos: photos)
-                    .padding()
-            }
-            .navigationTitle("Compare Photos")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.white)
-                }
-            }
+        ZStack {
+            Color(red: 30/255, green: 32/255, blue: 35/255)
+                .ignoresSafeArea()
+
+            JourneyCompareView(journey: journey, photos: photos, dismiss: dismiss)
         }
     }
 }
@@ -1999,6 +2013,7 @@ struct JourneyCompareSheet: View {
 struct JourneyCompareView: View {
     let journey: Journey
     let photos: [ProgressPhoto]
+    let dismiss: DismissAction
     @State private var left: ProgressPhoto?
     @State private var right: ProgressPhoto?
     @State private var mode: CompareMode = .parallel
@@ -2057,21 +2072,42 @@ struct JourneyCompareView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            if visiblePhotos.count >= 2 {
-                // Increased spacing for title/done button
-                Spacer().frame(height: AppStyle.Spacing.lg)
-                
-                // Segmented control
-                Picker("Mode", selection: $mode) {
-                    ForEach(CompareMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                // Custom header with title and done button - inside ScrollView
+                HStack {
+                    Spacer()
+                    Text("Compare Photos")
+                        .font(.title3.bold())
+                        .foregroundColor(.white)
+                    Spacer()
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                
-                Spacer().frame(height: AppStyle.Spacing.sm)
+                .overlay(
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.white)
+                                .font(.body)
+                        }
+                    }
+                    .padding(.horizontal)
+                )
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+
+                if visiblePhotos.count >= 2 {
+                        // Use standard Picker for better responsiveness
+                        Picker("Mode", selection: $mode) {
+                            Text("Parallel").tag(CompareMode.parallel)
+                            Text("Slider").tag(CompareMode.slider)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+
+                        Spacer().frame(height: AppStyle.Spacing.sm)
                 
                 // Action buttons ABOVE comparison
                 if left != nil && right != nil {
@@ -2147,14 +2183,15 @@ struct JourneyCompareView: View {
                                     .stroke(AppStyle.Colors.border, lineWidth: 1)
                             )
                         
-                        // Tap areas to select which side to replace
-                        HStack(spacing: 0) {
-                            // Left tap area
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selectSide(.left)
-                                }
+                        // Tap areas to select which side to replace (only in parallel mode)
+                        if mode == .parallel {
+                            HStack(spacing: 0) {
+                                // Left tap area
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectSide(.left)
+                                    }
                                 .overlay(
                                     VStack {
                                         if selectedSide == .left && showTooltip {
@@ -2224,6 +2261,7 @@ struct JourneyCompareView: View {
                                         Spacer()
                                     }
                                 )
+                            }
                         }
                         }
                     }
@@ -2292,27 +2330,28 @@ struct JourneyCompareView: View {
                     }
                     .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
                 }
-            } else {
-                // No photos state
-                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                    .fill(AppStyle.Colors.panel)
-                    .frame(height: 200)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.title2)
-                                .foregroundColor(AppStyle.Colors.textTertiary)
-                            Text("Add at least 2 photos to compare")
-                                .font(AppStyle.FontStyle.body)
-                                .foregroundColor(AppStyle.Colors.textSecondary)
-                                .multilineTextAlignment(.center)
-                        }
-                    )
-                    .padding(.horizontal)
+                } else {
+                    // No photos state
+                    RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                        .fill(AppStyle.Colors.panel)
+                        .frame(height: 200)
+                        .overlay(
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.title2)
+                                    .foregroundColor(AppStyle.Colors.textTertiary)
+                                Text("Add at least 2 photos to compare")
+                                    .font(AppStyle.FontStyle.body)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        )
+                        .padding(.horizontal)
+                        .padding(.top, 60)
+                }
             }
-            
-            Spacer()
         }
+        .ignoresSafeArea(edges: .bottom)
         .onAppear {
             // Auto-select oldest (before) and newest (after) visible photos
             if left == nil && right == nil && visiblePhotos.count >= 2 {
@@ -2364,36 +2403,48 @@ struct ImprovedCompareCanvas: View {
     }
     
     private func parallelView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
-        HStack(spacing: 8) {
+        // Calculate dimensions accounting for all padding and spacing
+        let totalHorizontalPadding: CGFloat = 16 // 8 on each side
+        let centerSpacing: CGFloat = 8
+        let imageWidth = (width - totalHorizontalPadding - centerSpacing) / 2
+
+        // Calculate height accounting for padding and date label
+        let totalVerticalPadding: CGFloat = 16 // 8 on top and bottom
+        let dateHeight: CGFloat = showDates ? 24 : 0 // Height for date text + spacing
+        let imageHeight = height - totalVerticalPadding - dateHeight
+
+        return HStack(spacing: centerSpacing) {
             // Left image with date
             VStack(spacing: 4) {
                 Image(uiImage: leftImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: (width - 16) / 2, height: height - (showDates ? 30 : 0))
+                    .frame(width: imageWidth, height: imageHeight)
                     .clipped()
                     .cornerRadius(AppStyle.Corner.md)
-                
+
                 if showDates {
                     Text(left.date.formatted(date: .abbreviated, time: .omitted))
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textSecondary)
+                        .frame(height: 20)
                 }
             }
-            
+
             // Right image with date
             VStack(spacing: 4) {
                 Image(uiImage: rightImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: (width - 16) / 2, height: height - (showDates ? 30 : 0))
+                    .frame(width: imageWidth, height: imageHeight)
                     .clipped()
                     .cornerRadius(AppStyle.Corner.md)
-                
+
                 if showDates {
                     Text(right.date.formatted(date: .abbreviated, time: .omitted))
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textSecondary)
+                        .frame(height: 20)
                 }
             }
         }
@@ -2401,73 +2452,81 @@ struct ImprovedCompareCanvas: View {
     }
     
     private func sliderView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
-        ZStack {
-            // Left image (base layer)
-            Image(uiImage: leftImg)
-                .resizable()
-                .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                .frame(width: width, height: height)
-                .clipped()
-            
-            // Right image (masked overlay)
-            Image(uiImage: rightImg)
-                .resizable()
-                .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                .frame(width: width, height: height)
-                .clipped()
-                .mask(alignment: .leading) {
-                    Rectangle()
-                        .frame(width: width - (width * sliderPosition))
-                        .offset(x: width * sliderPosition)
-                }
-            
-            // Divider line with handle
-            VStack {
-                Circle()
-                    .fill(AppStyle.Colors.textPrimary)
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Image(systemName: "arrow.left.and.right")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(AppStyle.Colors.bgDark)
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-            }
-            .frame(maxHeight: .infinity)
-            .frame(width: 3)
-            .background(AppStyle.Colors.textPrimary)
-            .position(x: width * sliderPosition, y: height / 2)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let newPosition = value.location.x / width
-                        sliderPosition = min(max(newPosition, 0), 1)
+        GeometryReader { geo in
+            ZStack {
+                // Left image (base layer)
+                Image(uiImage: leftImg)
+                    .resizable()
+                    .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                    .frame(width: width, height: height)
+                    .clipped()
+
+                // Right image (masked overlay)
+                Image(uiImage: rightImg)
+                    .resizable()
+                    .aspectRatio(contentMode: fitImage ? .fit : .fill)
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .mask(alignment: .leading) {
+                        Rectangle()
+                            .frame(width: width - (width * sliderPosition))
+                            .offset(x: width * sliderPosition)
                     }
-            )
-            
-            // Date labels for slider mode
-            if showDates {
+
+                // Divider line with handle
                 VStack {
-                    HStack {
-                        Text(left.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(AppStyle.FontStyle.caption2)
-                            .foregroundColor(AppStyle.Colors.textPrimary)
-                            .padding(6)
-                            .background(AppStyle.Colors.bgDark.opacity(0.8))
-                            .cornerRadius(6)
-                            .padding(8)
-                        
+                    Circle()
+                        .fill(AppStyle.Colors.textPrimary)
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "arrow.left.and.right")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(AppStyle.Colors.bgDark)
+                        )
+                        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                }
+                .frame(maxHeight: .infinity)
+                .frame(width: 3)
+                .background(AppStyle.Colors.textPrimary)
+                .position(x: geo.size.width * sliderPosition, y: geo.size.height / 2)
+                .allowsHitTesting(false)
+
+                // Full-frame drag overlay for slider interaction
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let newPosition = value.location.x / geo.size.width
+                                sliderPosition = min(max(newPosition, 0), 1)
+                            }
+                    )
+
+                // Date labels for slider mode
+                if showDates {
+                    VStack {
+                        HStack {
+                            Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                                .font(AppStyle.FontStyle.caption2)
+                                .foregroundColor(AppStyle.Colors.textPrimary)
+                                .padding(6)
+                                .background(AppStyle.Colors.bgDark.opacity(0.8))
+                                .cornerRadius(6)
+                                .padding(8)
+
+                            Spacer()
+
+                            Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                                .font(AppStyle.FontStyle.caption2)
+                                .foregroundColor(AppStyle.Colors.textPrimary)
+                                .padding(6)
+                                .background(AppStyle.Colors.bgDark.opacity(0.8))
+                                .cornerRadius(6)
+                                .padding(8)
+                        }
                         Spacer()
-                        
-                        Text(right.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(AppStyle.FontStyle.caption2)
-                            .foregroundColor(AppStyle.Colors.textPrimary)
-                            .padding(6)
-                            .background(AppStyle.Colors.bgDark.opacity(0.8))
-                            .cornerRadius(6)
-                            .padding(8)
                     }
-                    Spacer()
+                    .allowsHitTesting(false)
                 }
             }
         }
@@ -2507,19 +2566,25 @@ struct JourneyWatchSheet: View {
             ZStack {
                 Color(red: 30/255, green: 32/255, blue: 35/255)
                     .ignoresSafeArea()
-                
-                JourneyWatchView(journey: journey, photos: photos)
-                    .padding()
+
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 24)
+
+                    JourneyWatchView(journey: journey, photos: photos)
+                        .padding()
+                }
             }
             .navigationTitle("Watch Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button(action: {
                         dismiss()
+                    }) {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.white)
                     }
-                    .foregroundColor(.white)
                 }
             }
         }
@@ -2588,7 +2653,8 @@ struct JourneyWatchView: View {
     private var singlePhotoState: some View {
         VStack(spacing: AppStyle.Spacing.lg) {
             PhotoGridItem(photo: chronologicalPhotos[0])
-                .frame(height: 400)
+                .frame(maxWidth: .infinity)
+                .frame(height: 500)
                 .glassCard()
             
             Text("1 / 1 • \(chronologicalPhotos[0].date.formatted(date: .abbreviated, time: .omitted))")
@@ -2603,78 +2669,179 @@ struct JourneyWatchView: View {
     
     private var normalState: some View {
         VStack(spacing: AppStyle.Spacing.lg) {
-            // Main photo display
+            // Main photo display with overlay play button
             if currentIndex < chronologicalPhotos.count {
-                PhotoGridItem(photo: chronologicalPhotos[currentIndex])
-                    .frame(height: 400)
-                    .glassCard()
+                ZStack {
+                    PhotoGridItem(photo: chronologicalPhotos[currentIndex])
+                        .frame(maxWidth: .infinity)
+                        .glassCard()
+
+                    // Overlay play button on the image (only when not playing)
+                    if !isPlaying {
+                        Button(action: {
+                            isPlaying = true
+                        }) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 64))
+                                .foregroundColor(.white)
+                                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 2)
+                        }
+                        .accessibilityLabel("Play slideshow")
+                        .accessibilityHint("Play through all \(chronologicalPhotos.count) photos from oldest to newest")
+                    }
+                }
             }
-            
+
             // Position indicator: "1 / N • Date"
             Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[currentIndex].date.formatted(date: .abbreviated, time: .omitted))")
                 .font(AppStyle.FontStyle.caption)
                 .foregroundColor(AppStyle.Colors.textSecondary)
             
-            // Scrubber slider
+            // Scrubber slider with skip buttons
             HStack(spacing: 12) {
-                Text("1")
-                    .font(AppStyle.FontStyle.caption)
-                    .foregroundColor(AppStyle.Colors.textSecondary)
-                    .frame(width: 20)
-                
-                Slider(value: Binding(
-                    get: { Double(currentIndex) },
-                    set: { currentIndex = Int($0) }
-                ), in: 0...Double(max(0, chronologicalPhotos.count - 1)), step: 1)
-                .tint(AppStyle.Colors.accent)
-                
-                Text("\(chronologicalPhotos.count)")
-                    .font(AppStyle.FontStyle.caption)
-                    .foregroundColor(AppStyle.Colors.textSecondary)
-                    .frame(width: 30, alignment: .trailing)
-            }
-            .padding(.horizontal)
-            
-            // Controls: Previous | Play/Pause | Next
-            HStack(spacing: AppStyle.Spacing.xxxl) {
+                // Previous button
                 Button(action: {
+                    isPlaying = false  // Stop playback when manually navigating
                     if currentIndex > 0 {
                         currentIndex -= 1
                     }
                 }) {
-                    Image(systemName: "backward.fill")
-                        .font(.title2)
+                    Image(systemName: "arrowtriangle.left.fill")
+                        .font(.title3)
                         .foregroundColor(currentIndex == 0 ? AppStyle.Colors.textTertiary : AppStyle.Colors.textPrimary)
+                        .frame(width: 30)
                 }
                 .disabled(currentIndex == 0)
                 .accessibilityLabel("Previous photo")
                 .accessibilityHint("Go to the previous photo in the slideshow")
-                
+
+                Text("1")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                    .frame(width: 20)
+
+                Slider(value: Binding(
+                    get: { Double(currentIndex) },
+                    set: { newValue in
+                        isPlaying = false  // Stop playback when manually scrubbing
+                        currentIndex = Int(newValue)
+                    }
+                ), in: 0...Double(max(0, chronologicalPhotos.count - 1)), step: 1)
+                .tint(AppStyle.Colors.accent)
+
+                Text("\(chronologicalPhotos.count)")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                    .frame(width: 30, alignment: .trailing)
+
+                // Next button
                 Button(action: {
-                    isPlaying.toggle()
-                }) {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(AppStyle.Colors.textPrimary)
-                }
-                .accessibilityLabel(isPlaying ? "Pause slideshow" : "Play slideshow")
-                .accessibilityHint("Play through all \(chronologicalPhotos.count) photos from oldest to newest")
-                
-                Button(action: {
+                    isPlaying = false  // Stop playback when manually navigating
                     if currentIndex < chronologicalPhotos.count - 1 {
                         currentIndex += 1
                     }
                 }) {
-                    Image(systemName: "forward.fill")
-                        .font(.title2)
+                    Image(systemName: "arrowtriangle.right.fill")
+                        .font(.title3)
                         .foregroundColor(currentIndex >= chronologicalPhotos.count - 1 ? AppStyle.Colors.textTertiary : AppStyle.Colors.textPrimary)
+                        .frame(width: 30)
                 }
                 .disabled(currentIndex >= chronologicalPhotos.count - 1)
                 .accessibilityLabel("Next photo")
                 .accessibilityHint("Go to the next photo in the slideshow")
             }
-            .padding(.vertical, AppStyle.Spacing.sm)
-            
+            .padding(.horizontal)
+
+            // Speed control
+            VStack(spacing: 8) {
+                Text("Playback Speed")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+
+                HStack(spacing: 12) {
+                    Button(action: { playbackSpeed = 0.5 }) {
+                        Text("0.5x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
+                            )
+                    }
+
+                    Button(action: { playbackSpeed = 1.0 }) {
+                        Text("1x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
+                            )
+                    }
+
+                    Button(action: { playbackSpeed = 2.0 }) {
+                        Text("2x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
+                            )
+                    }
+
+                    Button(action: { playbackSpeed = 5.0 }) {
+                        Text("5x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
+                            )
+                    }
+
+                    Button(action: { playbackSpeed = 10.0 }) {
+                        Text("10x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
+                            )
+                    }
+                }
+            }
+            .padding(.horizontal)
+
             // Export button
             if isExporting {
                 VStack(spacing: 8) {
@@ -2739,16 +2906,18 @@ struct JourneyWatchView: View {
             isExporting = true
             exportProgress = 0
         }
-        
+
         // Capture needed data before detached task to avoid Sendable warnings
         let photosToExport = chronologicalPhotos
         let journeyName = journey.name
-        
+        let speed = playbackSpeed
+
         // Run export on background queue
         let result = await Task.detached {
             return await VideoExporter.exportProgressVideo(
                 photos: photosToExport,
                 journeyName: journeyName,
+                playbackSpeed: speed,
                 progressCallback: { progress in
                     Task { @MainActor in
                         exportProgress = progress
@@ -2771,13 +2940,14 @@ actor VideoExporter {
     static func exportProgressVideo(
         photos: [ProgressPhoto],
         journeyName: String,
+        playbackSpeed: Double = 1.0,
         progressCallback: @escaping (Double) -> Void
     ) async -> URL? {
         guard !photos.isEmpty else { return nil }
-        
+
         // Configuration
         let fps = 30
-        let frameDuration: Double = 1.0  // 1 second per photo
+        let frameDuration: Double = 1.0 / playbackSpeed  // Duration per photo based on speed
         let framesPerPhoto = Int(frameDuration * Double(fps))
         let resolution = CGSize(width: 1080, height: 1350)  // 4:5 aspect ratio
         

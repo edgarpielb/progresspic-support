@@ -356,11 +356,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     }
     
     @MainActor
-    func updateOrientation() {
+    func updateOrientation(forFrontCamera: Bool? = nil) {
         guard let connection = previewLayer?.connection else {
             return
         }
-        
+
+        // Use explicit parameter if provided, otherwise use instance variable
+        let isFrontCamera = forFrontCamera ?? isFront
+
         // Get the current interface orientation using modern API
         let interfaceOrientation: UIInterfaceOrientation
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -368,31 +371,31 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         } else {
             interfaceOrientation = .portrait
         }
-        
+
         // Use iOS 17+ rotation angle API when available
         if #available(iOS 17.0, *) {
             // Convert interface orientation to rotation angle in degrees
-            // Front and back cameras need different rotation angles
+            // Front and back cameras have different sensor orientations
             let rotationAngle: CGFloat
-            
-            if isFront {
-                // Front camera uses standard rotation
+
+            if isFrontCamera {
+                // Front camera sensor orientation
                 switch interfaceOrientation {
                 case .portrait:
-                    rotationAngle = 0
+                    rotationAngle = 270  // Front camera needs 270° for correct portrait orientation
                 case .portraitUpsideDown:
-                    rotationAngle = 180
-                case .landscapeLeft:
-                    rotationAngle = 270
-                case .landscapeRight:
                     rotationAngle = 90
+                case .landscapeLeft:
+                    rotationAngle = 180
+                case .landscapeRight:
+                    rotationAngle = 0
                 case .unknown:
-                    rotationAngle = 0
+                    rotationAngle = 270
                 @unknown default:
-                    rotationAngle = 0
+                    rotationAngle = 270
                 }
             } else {
-                // Back camera sensor is landscape by default, needs 90° adjustment
+                // Back camera sensor orientation
                 switch interfaceOrientation {
                 case .portrait:
                     rotationAngle = 90
@@ -408,10 +411,10 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                     rotationAngle = 90
                 }
             }
-            
+
             if connection.isVideoRotationAngleSupported(rotationAngle) {
                 connection.videoRotationAngle = rotationAngle
-                print("🔄 Video rotation angle set to: \(rotationAngle)° for \(isFront ? "front" : "back") camera in \(interfaceOrientation)")
+                print("🔄 Video rotation angle set to: \(rotationAngle)° for \(isFrontCamera ? "front" : "back") camera in \(interfaceOrientation)")
             }
         } else {
             // Fallback for iOS 16 and earlier
@@ -438,14 +441,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             }
             #endif
         }
-        
+
         // Mirror preview for front camera (like a mirror)
         // But capture will not be mirrored (normal photo)
         if connection.isVideoMirroringSupported {
             // IMPORTANT: Must disable automatic adjustment before manual control
             connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = isFront
-            print("🔄 Video mirroring set to: \(isFront ? "ON (front camera)" : "OFF (back camera)")")
+            connection.isVideoMirrored = isFrontCamera
+            print("🔄 Video mirroring set to: \(isFrontCamera ? "ON (front camera)" : "OFF (back camera)")")
         }
     }
 
@@ -505,12 +508,13 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                 
                 print("📹 Session inputs: \(self.session.inputs.count)")
                 print("📹 Session outputs: \(self.session.outputs.count)")
-                
+
                 // Wait a moment for the connection to be ready, then set orientation
+                // Pass the front parameter explicitly to ensure correct orientation
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.updateOrientation()
+                    self.updateOrientation(forFrontCamera: front)
                 }
-                
+
                 // Now start the session
                 self.startSessionAfterConfiguration()
             }
@@ -593,22 +597,28 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     }
     
     func flip() {
-        print("🔄 Flipping camera (front: \(isFront) -> \(!isFront))")
-        isFront.toggle()
-        
+        let oldValue = isFront
+        let newValue = !isFront
+        print("🔄 Flipping camera (front: \(oldValue) -> \(newValue))")
+
         // Stop session before reconfiguring to prevent race conditions
         DispatchQueue.global(qos: .userInitiated).async {
             if self.session.isRunning {
                 print("⏸️ Stopping session before flip")
                 self.session.stopRunning()
             }
-            
+
             // Wait a moment for the session to fully stop
             Thread.sleep(forTimeInterval: 0.1)
-            
-            // Now reconfigure with the new camera
-            self.configureSession(front: self.isFront)
-            
+
+            // Now reconfigure with the new camera (this will update orientation correctly)
+            self.configureSession(front: newValue)
+
+            // Update isFront state on main thread after configuration starts
+            DispatchQueue.main.async {
+                self.isFront = newValue
+            }
+
             // Force preview layer update on main thread
             DispatchQueue.main.async {
                 // Trigger a rebinding by temporarily setting to nil, then back
@@ -715,13 +725,29 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
 extension CameraService: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation(), var ui = UIImage(data: data) else { return }
-        
+
         // For front camera, flip the image horizontally to match what user sees in preview
+        // The rotation is already correct from the capture settings, we just need to mirror
         if isFront, let cgImage = ui.cgImage {
-            ui = UIImage(cgImage: cgImage, scale: ui.scale, orientation: .upMirrored)
-            print("🔄 Front camera photo mirrored to match preview")
+            // Flip horizontally while preserving the correct orientation
+            UIGraphicsBeginImageContextWithOptions(ui.size, false, ui.scale)
+            guard let context = UIGraphicsGetCurrentContext() else { return }
+
+            // Flip the context horizontally
+            context.translateBy(x: ui.size.width, y: 0)
+            context.scaleBy(x: -1.0, y: 1.0)
+
+            // Draw the image in the flipped context
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: ui.size.width, height: ui.size.height))
+
+            if let flippedImage = UIGraphicsGetImageFromCurrentImageContext() {
+                ui = flippedImage
+                print("🔄 Front camera photo mirrored horizontally")
+            }
+
+            UIGraphicsEndImageContext()
         }
-        
+
         latestPhoto = ui
     }
 }
@@ -856,11 +882,28 @@ struct HealthDataPoint: Identifiable {
 class HealthKitService: ObservableObject {
     static let shared = HealthKitService()
     private let healthStore = HKHealthStore()
-    
+
     @Published var isAuthorized = false
     @Published var bodyComposition = BodyCompositionData()
-    
-    private init() {}
+
+    private init() {
+        // Check authorization status on init
+        checkAuthorizationStatus()
+    }
+
+    private func checkAuthorizationStatus() {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            isAuthorized = false
+            return
+        }
+
+        // Check if we have authorization by trying to get the status
+        // Note: HealthKit doesn't provide a direct way to check read authorization
+        // but we can infer it from UserDefaults or by attempting to read data
+        let hasAuthorized = UserDefaults.standard.bool(forKey: "HealthKitAuthorized")
+        isAuthorized = hasAuthorized
+        print("📊 HealthKit authorization status: \(isAuthorized)")
+    }
     
     func requestAuthorization() async -> Bool {
         guard HKHealthStore.isHealthDataAvailable() else {
@@ -878,11 +921,14 @@ class HealthKitService: ObservableObject {
         do {
             try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
             isAuthorized = true
+            // Save authorization status to persist across app launches
+            UserDefaults.standard.set(true, forKey: "HealthKitAuthorized")
             print("✅ HealthKit authorization granted")
             return true
         } catch {
             print("❌ HealthKit authorization failed: \(error)")
             isAuthorized = false
+            UserDefaults.standard.set(false, forKey: "HealthKitAuthorized")
             return false
         }
     }

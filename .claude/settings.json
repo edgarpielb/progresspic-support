@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "env": {
+    "XCODE_DEFAULT_SIMULATOR": "iPhone 17 Pro"
+  }
+}
