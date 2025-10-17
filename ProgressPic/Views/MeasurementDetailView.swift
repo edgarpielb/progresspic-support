@@ -331,7 +331,7 @@ struct MeasurementDetailView: View {
                         .padding(.horizontal)
                     }
                     
-                    // All Recorded Data
+                        // All Recorded Data
                     if !filteredEntries.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("All Recorded Data")
@@ -340,7 +340,8 @@ struct MeasurementDetailView: View {
                                 .padding(.horizontal)
                             
                             List {
-                                ForEach(filteredEntries.reversed()) { entry in
+                                // Use explicit IDs for better performance
+                                ForEach(Array(filteredEntries.reversed().enumerated()), id: \.element.id) { index, entry in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(formatFullDate(entry.date))
@@ -536,6 +537,8 @@ struct MeasurementDetailView: View {
         
         let calendar = Calendar.current
         var dailyData: [Date: (values: [Double], journeyId: UUID, type: MeasurementType)] = [:]
+        // Pre-allocate capacity for better performance
+        dailyData.reserveCapacity(min(entries.count, 7))
         
         // Collect data points by day
         for entry in entries {

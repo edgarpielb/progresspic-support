@@ -342,6 +342,10 @@ struct PhotoGridThumb: View {
         .task {
             img = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 160, height: 160))
         }
+        .onDisappear {
+            // Clear image when view disappears to free memory
+            img = nil
+        }
     }
 }
 
@@ -365,7 +369,13 @@ struct Thumb: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.14)))
         .frame(width: 90, height: 90)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .task { img = await PhotoStore.fetchUIImage(localId: localId, targetSize: CGSize(width: 200, height: 200)) }
+        .task(id: localId) { 
+            img = await PhotoStore.fetchUIImage(localId: localId, targetSize: CGSize(width: 200, height: 200)) 
+        }
+        .onDisappear {
+            // Clear image when view disappears to free memory
+            img = nil
+        }
     }
 }
 
@@ -461,7 +471,7 @@ struct CompareCanvas: View {
                 }
             } else { ProgressView().frame(height: 420) }
         }
-        .task {
+        .task(id: "\(left.id)-\(right.id)") {
             // Capture localIds on main actor to avoid Sendable warnings
             let leftLocalId = left.assetLocalId
             let rightLocalId = right.assetLocalId
@@ -485,6 +495,11 @@ struct CompareCanvas: View {
             rightImg = await rightTask
             
             print("✅ Compare images loaded")
+        }
+        .onDisappear {
+            // Clear images when view disappears to free memory
+            leftImg = nil
+            rightImg = nil
         }
     }
 }

@@ -9,6 +9,13 @@ struct YearCalendarSheet: View {
     
     @State private var selectedYear: Int
     @State private var cachedActiveDays: Set<Date>?
+    @State private var cachedYearsWithData: Set<Int> = []
+    @State private var cachedYearStats: (photoDays: Int, measurementDays: Int, totalActiveDays: Int, bothActivities: Int)?
+    @State private var cachedUniqueDaysCount: Int = 0
+    @State private var cachedBestMonth: String = "N/A"
+    @State private var cachedAvgPhotosPerWeek: String = "0"
+    @State private var cachedAvgMeasurementsPerWeek: String = "0"
+    @State private var cachedFirstActivityDate: String = "N/A"
     
     init(journeys: [Journey]) {
         self.journeys = journeys
@@ -17,20 +24,9 @@ struct YearCalendarSheet: View {
         _selectedYear = State(initialValue: Calendar.current.component(.year, from: Date()))
     }
     
-    // Computed property to get all years with data
+    // Computed property to get all years with data - now uses cached value
     private var yearsWithData: Set<Int> {
-        let cal = Calendar.current
-        var years = Set<Int>()
-        
-        for photo in allPhotos {
-            years.insert(cal.component(.year, from: photo.date))
-        }
-        
-        for measurement in allMeasurements {
-            years.insert(cal.component(.year, from: measurement.date))
-        }
-        
-        return years
+        return cachedYearsWithData
     }
     
     var body: some View {
@@ -74,10 +70,21 @@ struct YearCalendarSheet: View {
                 }
             }
             .onAppear {
-                cachedActiveDays = calculateActiveDaysSet()
+                // Calculate all cached values once on appear
+                calculateAndCacheAllData()
             }
             .onChange(of: selectedYear) { _, _ in
+                // Only recalculate year-specific data when year changes
                 cachedActiveDays = calculateActiveDaysSet()
+                cachedYearStats = calculateYearStats()
+            }
+            .onChange(of: allPhotos.count) { _, _ in
+                // Recalculate when data changes
+                calculateAndCacheAllData()
+            }
+            .onChange(of: allMeasurements.count) { _, _ in
+                // Recalculate when data changes
+                calculateAndCacheAllData()
             }
         }
     }
@@ -118,7 +125,8 @@ struct YearCalendarSheet: View {
     }
     
     private var statsSummarySection: some View {
-        let stats = calculateYearStats()
+        // Use cached stats instead of recalculating
+        let stats = cachedYearStats ?? (photoDays: 0, measurementDays: 0, totalActiveDays: 0, bothActivities: 0)
         
         return VStack(spacing: 12) {
             HStack(spacing: 12) {
@@ -189,9 +197,14 @@ struct YearCalendarSheet: View {
     
     private func calendarSection(activeDays: Set<Date>) -> some View {
         let cal = Calendar.current
-        let months = (1...12).compactMap { month -> (name: String, days: [Date]) in
+        
+        // Create a date formatter once instead of 12 times
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM"
+        
+        let months = (1...12).compactMap { month -> (name: String, days: [Date], id: String) in
             guard let monthStart = cal.date(from: DateComponents(year: selectedYear, month: month, day: 1)) else {
-                return ("", [])
+                return ("", [], "")
             }
             
             let range = cal.range(of: .day, in: .month, for: monthStart)!
@@ -199,13 +212,12 @@ struct YearCalendarSheet: View {
                 cal.date(from: DateComponents(year: selectedYear, month: month, day: day))
             }
             
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMMM"
-            return (formatter.string(from: monthStart), days)
+            let monthName = formatter.string(from: monthStart)
+            return (monthName, days, "\(selectedYear)-\(month)")
         }
         
         return VStack(alignment: .leading, spacing: 16) {
-            // Create 4 rows of 3 months each
+            // Create 4 rows of 3 months each with stable IDs
             ForEach(0..<4, id: \.self) { row in
                 HStack(spacing: 12) {
                     ForEach(0..<3, id: \.self) { col in
@@ -217,6 +229,7 @@ struct YearCalendarSheet: View {
                                 activeDays: activeDays
                             )
                             .frame(maxWidth: .infinity)
+                            .id(months[index].id)  // Add stable ID for better diffing
                         }
                     }
                 }
@@ -225,6 +238,32 @@ struct YearCalendarSheet: View {
     }
     
     // MARK: - Calculations
+    
+    private func calculateAndCacheAllData() {
+        // Calculate all data once and cache it
+        let cal = Calendar.current
+        
+        // Calculate years with data
+        var years = Set<Int>()
+        for photo in allPhotos {
+            years.insert(cal.component(.year, from: photo.date))
+        }
+        for measurement in allMeasurements {
+            years.insert(cal.component(.year, from: measurement.date))
+        }
+        cachedYearsWithData = years
+        
+        // Calculate year-specific data
+        cachedActiveDays = calculateActiveDaysSet()
+        cachedYearStats = calculateYearStats()
+        
+        // Calculate global stats (not year-specific)
+        cachedUniqueDaysCount = calculateUniqueDaysCount()
+        cachedBestMonth = calculateBestMonth()
+        cachedAvgPhotosPerWeek = calculateAveragePhotosPerWeek()
+        cachedAvgMeasurementsPerWeek = calculateAverageMeasurementsPerWeek()
+        cachedFirstActivityDate = calculateFirstActivityDate()
+    }
     
     private func calculateActiveDaysSet() -> Set<Date> {
         let cal = Calendar.current
@@ -257,17 +296,22 @@ struct YearCalendarSheet: View {
         var photoDays = Set<Date>()
         var measurementDays = Set<Date>()
         
-        for photo in allPhotos where cal.component(.year, from: photo.date) == selectedYear {
-            let day = cal.startOfDay(for: photo.date)
-            if day <= today {
-                photoDays.insert(day)
+        // Optimized: Only iterate through photos/measurements for selected year
+        for photo in allPhotos {
+            if cal.component(.year, from: photo.date) == selectedYear {
+                let day = cal.startOfDay(for: photo.date)
+                if day <= today {
+                    photoDays.insert(day)
+                }
             }
         }
         
-        for measurement in allMeasurements where cal.component(.year, from: measurement.date) == selectedYear {
-            let day = cal.startOfDay(for: measurement.date)
-            if day <= today {
-                measurementDays.insert(day)
+        for measurement in allMeasurements {
+            if cal.component(.year, from: measurement.date) == selectedYear {
+                let day = cal.startOfDay(for: measurement.date)
+                if day <= today {
+                    measurementDays.insert(day)
+                }
             }
         }
         
@@ -286,18 +330,18 @@ struct YearCalendarSheet: View {
             VStack(spacing: 10) {
                 StatRow(icon: "photo.fill", label: "Total Photos", value: "\(allPhotos.count)")
                 StatRow(icon: "ruler.fill", label: "Total Measurements", value: "\(allMeasurements.count)")
-                StatRow(icon: "calendar.badge.checkmark", label: "Active Days", value: "\(uniqueDaysCount)")
-                StatRow(icon: "star.fill", label: "Best Month", value: bestMonth)
-                StatRow(icon: "chart.line.uptrend.xyaxis", label: "Avg Photos/Week", value: averagePhotosPerWeek)
-                StatRow(icon: "chart.bar.fill", label: "Avg Measurements/Week", value: averageMeasurementsPerWeek)
-                StatRow(icon: "sparkles", label: "First Activity", value: firstActivityDate)
+                StatRow(icon: "calendar.badge.checkmark", label: "Active Days", value: "\(cachedUniqueDaysCount)")
+                StatRow(icon: "star.fill", label: "Best Month", value: cachedBestMonth)
+                StatRow(icon: "chart.line.uptrend.xyaxis", label: "Avg Photos/Week", value: cachedAvgPhotosPerWeek)
+                StatRow(icon: "chart.bar.fill", label: "Avg Measurements/Week", value: cachedAvgMeasurementsPerWeek)
+                StatRow(icon: "sparkles", label: "First Activity", value: cachedFirstActivityDate)
             }
             .padding(12)
             .glassCard()
         }
     }
     
-    private var uniqueDaysCount: Int {
+    private func calculateUniqueDaysCount() -> Int {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         var days = Set<Date>()
@@ -317,7 +361,7 @@ struct YearCalendarSheet: View {
         return days.count
     }
     
-    private var bestMonth: String {
+    private func calculateBestMonth() -> String {
         let cal = Calendar.current
         
         // Combine photos and measurements by month
@@ -341,31 +385,40 @@ struct YearCalendarSheet: View {
         return monthNames[bestMonthNum - 1]
     }
     
-    private var averagePhotosPerWeek: String {
+    private func calculateAveragePhotosPerWeek() -> String {
         guard !allPhotos.isEmpty else { return "0" }
         
         let cal = Calendar.current
-        let firstDate = allPhotos.map { $0.date }.min() ?? Date()
+        let firstDate = allPhotos.first?.date ?? Date()
         let weeks = max(1, cal.dateComponents([.weekOfYear], from: firstDate, to: Date()).weekOfYear ?? 1)
         let avg = Double(allPhotos.count) / Double(weeks)
         
         return String(format: "%.1f", avg)
     }
     
-    private var averageMeasurementsPerWeek: String {
+    private func calculateAverageMeasurementsPerWeek() -> String {
         guard !allMeasurements.isEmpty else { return "0" }
         
         let cal = Calendar.current
-        let firstDate = allMeasurements.map { $0.date }.min() ?? Date()
+        let firstDate = allMeasurements.first?.date ?? Date()
         let weeks = max(1, cal.dateComponents([.weekOfYear], from: firstDate, to: Date()).weekOfYear ?? 1)
         let avg = Double(allMeasurements.count) / Double(weeks)
         
         return String(format: "%.1f", avg)
     }
     
-    private var firstActivityDate: String {
-        let allDates = allPhotos.map { $0.date } + allMeasurements.map { $0.date }
-        guard let first = allDates.min() else { return "N/A" }
+    private func calculateFirstActivityDate() -> String {
+        let photoDate = allPhotos.first?.date
+        let measurementDate = allMeasurements.first?.date
+        
+        let first: Date?
+        if let photoDate = photoDate, let measurementDate = measurementDate {
+            first = min(photoDate, measurementDate)
+        } else {
+            first = photoDate ?? measurementDate
+        }
+        
+        guard let first = first else { return "N/A" }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: first)
@@ -377,9 +430,14 @@ private struct MonthView: View {
     let days: [Date]
     let activeDays: Set<Date>
     
-    private var weeks: [[Date?]] {
+    // Cache these values to avoid recalculating on every render
+    @State private var weeks: [[Date?]] = []
+    @State private var today: Date = Date()
+    
+    private func calculateWeeks() -> [[Date?]] {
+        guard !days.isEmpty else { return [] }
         let cal = Calendar.current
-        let firstWeekday = cal.component(.weekday, from: days.first ?? Date())
+        let firstWeekday = cal.component(.weekday, from: days.first!)
         let startingColumn = (firstWeekday + 5) % 7
         return createWeeks(days: days, startingColumn: startingColumn)
     }
@@ -401,14 +459,13 @@ private struct MonthView: View {
                     }
                 }
                 
-                // Days grid - simplified
+                // Days grid - use cached values for better performance
                 let cal = Calendar.current
-                let today = cal.startOfDay(for: Date())
                 
                 // Always show 6 rows to ensure consistent height
                 ForEach(0..<6, id: \.self) { weekIndex in
                     HStack(spacing: 2) {
-                        ForEach(0..<7) { dayIndex in
+                        ForEach(0..<7, id: \.self) { dayIndex in
                             if weekIndex < weeks.count, let day = weeks[weekIndex][dayIndex] {
                                 let dayStart = cal.startOfDay(for: day)
                                 DayCell(
@@ -426,6 +483,10 @@ private struct MonthView: View {
             }
             .padding(8)
             .glassCard()
+        }
+        .onAppear {
+            weeks = calculateWeeks()
+            today = Calendar.current.startOfDay(for: Date())
         }
     }
     

@@ -276,7 +276,8 @@ struct BodyCompositionDetailView: View {
                         
                         if !historicalData.isEmpty {
                             List {
-                                ForEach(historicalData.reversed()) { point in
+                                // Use explicit IDs for better performance
+                                ForEach(Array(historicalData.reversed().enumerated()), id: \.element.id) { index, point in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(formatFullDate(point.date))
@@ -545,6 +546,8 @@ struct BodyCompositionDetailView: View {
         
         let calendar = Calendar.current
         var dailyData: [Date: [Double]] = [:]
+        // Pre-allocate capacity for better performance
+        dailyData.reserveCapacity(min(data.count, 7))
         
         // Collect data points by day
         for point in data {

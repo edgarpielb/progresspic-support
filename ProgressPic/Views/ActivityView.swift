@@ -176,6 +176,10 @@ struct CombinedWeekAndStreakView: View {
     @Query private var allPhotos: [ProgressPhoto]
     @Query private var allMeasurements: [MeasurementEntry]
     
+    @State private var cachedTakenDays: Set<Date> = []
+    @State private var cachedCurrentStreak: Int = 0
+    @State private var cachedLongestStreak: Int = 0
+    
     init(journeys: [Journey]) {
         self.journeys = journeys
         _allPhotos = Query(sort: \ProgressPhoto.date, order: .forward)
@@ -187,8 +191,6 @@ struct CombinedWeekAndStreakView: View {
         let today = cal.startOfDay(for: Date())
         let startOfWeek = cal.date(from: cal.dateComponents([.yearForWeekOfYear,.weekOfYear], from: today)) ?? today
         let days = (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: startOfWeek) }
-        let takenSet = calculateTakenDays()
-        let (current, longest) = calculateStreaks()
         
         return VStack(alignment: .leading, spacing: 16) {
             // Week section
@@ -205,7 +207,7 @@ struct CombinedWeekAndStreakView: View {
                     ForEach(days, id: \.self) { d in
                         EnhancedDayBubble(date: d,
                                          isToday: cal.isDate(d, inSameDayAs: today),
-                                         done: takenSet.contains(d))
+                                         done: cachedTakenDays.contains(d))
                     }
                 }
             }
@@ -220,7 +222,7 @@ struct CombinedWeekAndStreakView: View {
                         Text("Current")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("\(current) day\(current == 1 ? "" : "s")")
+                        Text("\(cachedCurrentStreak) day\(cachedCurrentStreak == 1 ? "" : "s")")
                             .font(.title3.bold())
                             .foregroundColor(.white)
                     }
@@ -235,7 +237,7 @@ struct CombinedWeekAndStreakView: View {
                         Text("Longest")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text("\(longest) day\(longest == 1 ? "" : "s")")
+                        Text("\(cachedLongestStreak) day\(cachedLongestStreak == 1 ? "" : "s")")
                             .font(.title3.bold())
                             .foregroundColor(.white)
                     }
@@ -244,6 +246,22 @@ struct CombinedWeekAndStreakView: View {
             }
         }
         .padding(.vertical, 4)
+        .onAppear {
+            calculateAndCacheData()
+        }
+        .onChange(of: allPhotos.count) { _, _ in
+            calculateAndCacheData()
+        }
+        .onChange(of: allMeasurements.count) { _, _ in
+            calculateAndCacheData()
+        }
+    }
+    
+    private func calculateAndCacheData() {
+        cachedTakenDays = calculateTakenDays()
+        let streaks = calculateStreaks()
+        cachedCurrentStreak = streaks.0
+        cachedLongestStreak = streaks.1
     }
     
     private func calculateTakenDays() -> Set<Date> {
@@ -269,24 +287,12 @@ struct CombinedWeekAndStreakView: View {
         return takenSet
     }
     
-    private func calculateStreaks() -> (Int, Int) {
+    private func calculateStreaks() -> (current: Int, longest: Int) {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         
-        // Combine photo and measurement days (excluding future dates)
-        var allActivityDays = Set<Date>()
-        for photo in allPhotos {
-            let dayStart = cal.startOfDay(for: photo.date)
-            if dayStart <= today {
-                allActivityDays.insert(dayStart)
-            }
-        }
-        for measurement in allMeasurements {
-            let dayStart = cal.startOfDay(for: measurement.date)
-            if dayStart <= today {
-                allActivityDays.insert(dayStart)
-            }
-        }
+        // Use the cached taken days to avoid recalculating
+        let allActivityDays = cachedTakenDays.isEmpty ? calculateTakenDays() : cachedTakenDays
         
         guard !allActivityDays.isEmpty else { return (0, 0) }
         
@@ -295,32 +301,34 @@ struct CombinedWeekAndStreakView: View {
         var longestStreak = 0
         var tempStreak = 1
         
-        // Calculate longest streak
+        // Calculate longest streak in one pass
         for i in 0..<days.count {
-            if i > 0, let nextDay = cal.date(byAdding: .day, value: 1, to: days[i-1]), 
-               cal.isDate(nextDay, inSameDayAs: days[i]) {
-                tempStreak += 1
-            } else if i > 0 {
-                longestStreak = max(longestStreak, tempStreak)
-                tempStreak = 1
+            if i > 0 {
+                let daysDiff = cal.dateComponents([.day], from: days[i-1], to: days[i]).day ?? 0
+                if daysDiff == 1 {
+                    tempStreak += 1
+                } else {
+                    longestStreak = max(longestStreak, tempStreak)
+                    tempStreak = 1
+                }
             }
         }
         longestStreak = max(longestStreak, tempStreak)
         
         // Calculate current streak (must include today or yesterday)
-        let lastActivityDay = days.last!
+        guard let lastActivityDay = days.last else { return (0, longestStreak) }
         
         // Check if last activity was today or yesterday
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        let daysSinceLastActivity = cal.dateComponents([.day], from: lastActivityDay, to: today).day ?? 0
         
-        if cal.isDate(lastActivityDay, inSameDayAs: today) || cal.isDate(lastActivityDay, inSameDayAs: yesterday) {
+        if daysSinceLastActivity <= 1 {
             // Count backwards from last activity day
             currentStreak = 1
             var checkDate = lastActivityDay
             
             for day in days.reversed().dropFirst() {
-                if let prevDay = cal.date(byAdding: .day, value: -1, to: checkDate),
-                   cal.isDate(day, inSameDayAs: prevDay) {
+                let daysDiff = cal.dateComponents([.day], from: day, to: checkDate).day ?? 0
+                if daysDiff == 1 {
                     currentStreak += 1
                     checkDate = day
                 } else {
