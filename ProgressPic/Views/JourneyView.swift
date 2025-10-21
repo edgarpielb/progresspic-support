@@ -13,65 +13,99 @@ private let accent = Color(red: 0.24, green: 0.85, blue: 0.80)
 
 struct JourneysView: View {
     @Environment(\.modelContext) private var ctx
-    @Query(sort: \Journey.createdAt, order: .reverse) private var journeys: [Journey]
+    @Query(sort: \Journey.sortOrder, order: .forward) private var journeys: [Journey]
     @State private var showNew = false
+    @State private var editMode: EditMode = .inactive
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 16) {
+        NavigationStack(path: $navigationPath) {
+            List {
+                // Existing journeys
+                ForEach(journeys) { j in
+                    Button(action: {
+                        if editMode == .inactive {
+                            navigationPath.append(j)
+                        }
+                    }) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Photo collage
+                            JourneyPhotoCollage(journey: j)
 
-                    // Existing journeys
-                    ForEach(journeys) { j in
-                        NavigationLink {
-                            JourneyDetailView(journey: j)
-                        } label: {
-                            HStack(spacing: 16) {
-                                JourneyCoverThumb(journey: j)
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(j.name).font(.title3.bold()).foregroundColor(.white)
+                            // Journey info with navigation arrow
+                            HStack(alignment: .center) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(j.name)
+                                        .font(.title3.bold())
+                                        .foregroundColor(.white)
+
                                     let count = j.photos?.count ?? 0
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 12) {
                                         Text("\(count) photos")
                                             .font(.subheadline)
                                             .foregroundStyle(.white.opacity(0.7))
+                                        Text("•")
+                                            .foregroundStyle(.white.opacity(0.4))
                                         Text("Started \(j.createdAt.formatted(date: .abbreviated, time: .omitted))")
                                             .font(.subheadline)
                                             .foregroundStyle(.white.opacity(0.7))
                                     }
                                 }
-                                Spacer()
-                            }
-                            .padding(16)
-                            .glassCard(corner: 20)
-                            .contentShape(RoundedRectangle(cornerRadius: 20))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
-                    }
 
-                    // Add journey card - only show when no journeys exist
-                    if journeys.isEmpty {
-                        Button {
-                            showNew = true
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 26, weight: .bold))
-                                Text("Add Journey").font(.headline)
+                                Spacer()
+
+                                // Navigation arrow aligned with text
+                                if editMode == .inactive {
+                                    Image(systemName: "chevron.right")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundColor(.white.opacity(0.4))
+                                }
                             }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity, minHeight: 90)
-                            .glassCard(corner: 24)
-                            .contentShape(RoundedRectangle(cornerRadius: 24))
+                            .padding(.horizontal, 4)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .opacity(editMode == .active ? 0.7 : 1.0)
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            editMode = .active
+                        }
+                        // Haptic feedback
+                        let generator = UIImpactFeedbackGenerator(style: .medium)
+                        generator.impactOccurred()
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
                 }
-                .padding(.vertical, 16)
-                .padding(.bottom, 120) // space for tab bar
+                .onMove { fromOffsets, toOffset in
+                    moveJourneys(from: fromOffsets, to: toOffset)
+                }
+
+                // Add journey card - only show when no journeys exist
+                if journeys.isEmpty {
+                    Button {
+                        showNew = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 26, weight: .bold))
+                            Text("Add Journey").font(.headline)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 90)
+                        .glassCard(corner: 24)
+                        .contentShape(RoundedRectangle(cornerRadius: 24))
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(AppStyle.Colors.bgDark)
             .navigationTitle("Journeys")
             .navigationBarTitleDisplayMode(.inline)
@@ -81,20 +115,77 @@ struct JourneysView: View {
                         .font(.title2.bold())
                         .foregroundColor(.white)
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    if editMode == .active {
+                        Button("Done") {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                editMode = .inactive
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .fontWeight(.semibold)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: {
-                        showNew = true
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.title3)
-                            .foregroundColor(.white)
+                    if editMode == .inactive {
+                        Button(action: {
+                            showNew = true
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.title3)
+                                .foregroundColor(.white)
+                        }
                     }
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .environment(\.editMode, $editMode)
+            .navigationDestination(for: Journey.self) { journey in
+                JourneyDetailView(journey: journey)
+            }
         }
         .sheet(isPresented: $showNew) { NewJourneySheet() }
+        .task {
+            // Initialize sortOrder for existing journeys that don't have it set
+            await initializeSortOrder()
+        }
+    }
+
+    private func moveJourneys(from source: IndexSet, to destination: Int) {
+        var reorderedJourneys = journeys
+        reorderedJourneys.move(fromOffsets: source, toOffset: destination)
+
+        // Update sortOrder for all journeys
+        for (index, journey) in reorderedJourneys.enumerated() {
+            journey.sortOrder = index
+        }
+
+        do {
+            try ctx.save()
+        } catch {
+            print("❌ Error saving reorder: \(error)")
+        }
+    }
+
+    private func initializeSortOrder() async {
+        var needsSave = false
+
+        for (index, journey) in journeys.enumerated() {
+            if journey.sortOrder == 0 && index != 0 {
+                journey.sortOrder = index
+                needsSave = true
+            }
+        }
+
+        if needsSave {
+            do {
+                try ctx.save()
+                print("✅ Initialized sortOrder for existing journeys")
+            } catch {
+                print("❌ Error initializing sortOrder: \(error)")
+            }
+        }
     }
 }
 
@@ -377,6 +468,26 @@ struct JourneyDetailView: View {
                 // Remove the deleted photo from the local array to update UI immediately
                 photos.removeAll { $0.id == deletedPhoto.id }
             }
+            .onDisappear {
+                // Refresh the photo when edit sheet is dismissed
+                if let editedPhoto = selectedPhotoForEdit {
+                    Task {
+                        // Fetch the updated photo from the context
+                        let journeyId = journey.id
+                        let photoId = editedPhoto.id
+                        let predicate = #Predicate<ProgressPhoto> { photo in
+                            photo.journeyId == journeyId && photo.id == photoId
+                        }
+                        let descriptor = FetchDescriptor(predicate: predicate)
+                        
+                        if let updatedPhoto = try? ctx.fetch(descriptor).first,
+                           let index = photos.firstIndex(where: { $0.id == editedPhoto.id }) {
+                            // Update the photo in the array to trigger view refresh
+                            photos[index] = updatedPhoto
+                        }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showJourneySettings) {
             JourneySettingsView(journey: journey, onJourneyDeleted: { journeyWasDeleted in
@@ -436,20 +547,33 @@ struct JourneyDetailView: View {
                 let originalId = try await PhotoStore.saveToAppDirectory(uiImage)
                 print("💾 Saved original image \(index + 1)/\(items.count)")
 
-                // Crop to 4:5 and save cropped version
-                let croppedImage = PhotoStore.cropTo4x5(uiImage)
-                let croppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
-                print("✂️ Saved cropped image \(index + 1)/\(items.count)")
+                // Calculate initial transform to fill 4:5 aspect ratio
+                let imageAspect = uiImage.size.width / uiImage.size.height
+                let targetAspect: CGFloat = 4.0 / 5.0  // 4:5 crop ratio
+                
+                let fillScale: CGFloat
+                if imageAspect > targetAspect {
+                    fillScale = imageAspect / targetAspect
+                } else {
+                    fillScale = targetAspect / imageAspect
+                }
+                
+                let initialTransform = AlignTransform(
+                    scale: fillScale,
+                    offsetX: 0,
+                    offsetY: 0,
+                    rotation: 0
+                )
 
-                // Create progress photo entry with both IDs
+                // Create progress photo entry with original ID and initial transform
                 await MainActor.run {
                     let progressPhoto = ProgressPhoto(
                         journeyId: journey.id,
                         date: creationDate,
-                        assetLocalId: croppedId,
+                        assetLocalId: originalId,  // Use original ID directly
                         isFrontCamera: false,
-                        alignTransform: .identity,
-                        originalAssetLocalId: originalId
+                        alignTransform: initialTransform,
+                        originalAssetLocalId: nil  // No separate original needed
                     )
                     progressPhoto.journey = journey
                     ctx.insert(progressPhoto)

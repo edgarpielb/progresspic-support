@@ -15,6 +15,8 @@ struct PhotoEditSheet: View {
 
     @State private var currentPhoto: ProgressPhoto
     @State private var image: UIImage?
+    @State private var imageCache: [String: UIImage] = [:]  // Cache all loaded images
+    @State private var isLoadingImages = false
     @State private var showNotesEditor = false
     @State private var showDatePicker = false
     @State private var showAdjustView = false
@@ -49,18 +51,34 @@ struct PhotoEditSheet: View {
                     .padding(.bottom, AppStyle.Spacing.xl)
 
                     // Main image with 4:5 aspect ratio (already cropped to 4:5)
-                    if let img = image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, AppStyle.Spacing.md)
-                    } else {
-                        ProgressView()
-                            .tint(AppStyle.Colors.textPrimary)
-                            .frame(maxWidth: .infinity)
-                            .aspectRatio(4/5, contentMode: .fit)
+                    ZStack {
+                        if let img = image {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, AppStyle.Spacing.md)
+                                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                        } else if isLoadingImages {
+                            ProgressView()
+                                .tint(AppStyle.Colors.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(4/5, contentMode: .fit)
+                        } else {
+                            // Placeholder for when no image is available
+                            Rectangle()
+                                .fill(AppStyle.Colors.panel)
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(4/5, contentMode: .fit)
+                                .overlay(
+                                    Image(systemName: "photo")
+                                        .font(.largeTitle)
+                                        .foregroundColor(AppStyle.Colors.textTertiary)
+                                )
+                                .padding(.horizontal, AppStyle.Spacing.md)
+                        }
                     }
+                    .animation(.easeInOut(duration: 0.2), value: currentPhoto.id)
                     
                     Spacer(minLength: AppStyle.Spacing.lg)
                     
@@ -127,16 +145,24 @@ struct PhotoEditSheet: View {
             .safeAreaInset(edge: .bottom) {
                 actionBar
             }
-            .task(id: currentPhoto.id) {
-                await loadImage()
-                notesText = currentPhoto.notes ?? ""
-                selectedDate = currentPhoto.date
+            .task {
+                // Pre-load all images when the sheet opens
+                await preloadAllImages()
+            }
+            .onChange(of: currentPhoto) { _, newPhoto in
+                // Switch to the cached image immediately
+                switchToPhoto(newPhoto)
+                notesText = newPhoto.notes ?? ""
+                selectedDate = newPhoto.date
             }
             .onChange(of: showAdjustView) { _, isShowing in
                 // Reload image when adjust sheet is dismissed to show updated transform
                 if !isShowing {
+                    // Clear cache and reload to show updated transform
+                    imageCache.removeValue(forKey: currentPhoto.id.uuidString)
+                    image = nil
                     Task {
-                        await loadImage()
+                        await loadSingleImage(currentPhoto)
                     }
                 }
             }
@@ -166,12 +192,22 @@ struct PhotoEditSheet: View {
             // Notes
             Button(action: { showNotesEditor = true }) {
                 VStack(spacing: 6) {
-                    Image(systemName: currentPhoto.notes != nil ? "note.text.badge.plus" : "note.text")
-                        .font(.system(size: AppStyle.IconSize.xl))
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "note.text")
+                            .font(.system(size: AppStyle.IconSize.xl))
+                        
+                        // Notification badge when there's a note
+                        if currentPhoto.notes != nil {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 10, height: 10)
+                                .offset(x: 8, y: -8)
+                        }
+                    }
                     Text("Notes")
                         .font(AppStyle.FontStyle.caption)
                 }
-                .foregroundColor(currentPhoto.notes != nil ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                .foregroundColor(AppStyle.Colors.textPrimary)
                 .frame(maxWidth: .infinity)
             }
             .accessibilityLabel(currentPhoto.notes != nil ? "Edit notes" : "Add notes")
@@ -324,21 +360,88 @@ struct PhotoEditSheet: View {
     }
     
     // MARK: - Actions
-    private func loadImage() async {
-        // Load image and render the 4:5 cropped version with transform applied
-        guard let baseImage = await PhotoStore.fetchUIImage(localId: currentPhoto.assetLocalId, targetSize: nil) else {
+    private func preloadAllImages() async {
+        guard !isLoadingImages else { return }
+        
+        await MainActor.run {
+            isLoadingImages = true
+        }
+        
+        // Load images in parallel for better performance
+        await withTaskGroup(of: (String, UIImage?).self) { group in
+            // Limit concurrent loads to prevent memory issues
+            let photosToLoad = allPhotos.prefix(20)  // Load up to 20 photos
+            
+            for photo in photosToLoad {
+                group.addTask {
+                    // Load original if available, otherwise use the stored image
+                    let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+                    if let baseImage = await PhotoStore.fetchUIImage(localId: imageId, targetSize: CGSize(width: 800, height: 1000)) {
+                        let displayImage = await self.renderCroppedImage(from: baseImage, transform: photo.alignTransform)
+                        return (photo.id.uuidString, displayImage)
+                    }
+                    return (photo.id.uuidString, nil)
+                }
+            }
+            
+            // Collect results
+            for await (photoId, img) in group {
+                if let img = img {
+                    await MainActor.run {
+                        imageCache[photoId] = img
+                    }
+                }
+            }
+        }
+        
+        await MainActor.run {
+            // Set the current image from cache
+            if let cachedImage = imageCache[currentPhoto.id.uuidString] {
+                image = cachedImage
+            } else {
+                // If not in cache, load it individually
+                Task {
+                    await loadSingleImage(currentPhoto)
+                }
+            }
+            isLoadingImages = false
+        }
+    }
+    
+    private func loadSingleImage(_ photo: ProgressPhoto) async {
+        // Load original if available, otherwise use the stored image
+        let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+        guard let baseImage = await PhotoStore.fetchUIImage(localId: imageId, targetSize: CGSize(width: 800, height: 1000)) else {
             return
         }
         
-        // Render the final cropped 4:5 image as the user sees it in adjust view
-        let croppedImage = renderCroppedImage(from: baseImage, transform: currentPhoto.alignTransform)
+        // Apply the saved transform to show the image as the user edited it
+        let displayImage = renderCroppedImage(from: baseImage, transform: photo.alignTransform)
         
         await MainActor.run {
-            image = croppedImage
+            imageCache[photo.id.uuidString] = displayImage
+            if photo.id == currentPhoto.id {
+                image = displayImage
+            }
+        }
+    }
+    
+    private func switchToPhoto(_ photo: ProgressPhoto) {
+        // Check cache first
+        if let cachedImage = imageCache[photo.id.uuidString] {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                image = cachedImage
+            }
+        } else {
+            // Load if not cached - keep previous image visible during load to avoid flicker
+            Task {
+                await loadSingleImage(photo)
+            }
         }
     }
     
     /// Renders the final 4:5 cropped image with the transform applied
+    @MainActor
     private func renderCroppedImage(from sourceImage: UIImage, transform: AlignTransform) -> UIImage {
         // Calculate target size maintaining 4:5 aspect ratio
         // Use source image width and calculate height
@@ -388,13 +491,11 @@ struct PhotoEditSheet: View {
     private func previousPhoto() {
         guard canGoPrevious else { return }
         currentPhoto = allPhotos[currentPhotoIndex - 1]
-        image = nil
     }
     
     private func nextPhoto() {
         guard canGoNext else { return }
         currentPhoto = allPhotos[currentPhotoIndex + 1]
-        image = nil
     }
     
     private func saveNotes() {
@@ -445,17 +546,20 @@ struct PhotoAdjustSheet: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var rotation: Angle = .zero
+    @State private var lastRotation: Angle = .zero
     @State private var isSaving = false
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var minScale: CGFloat = 1
     @State private var hasCalculatedInitialScale = false
+    @State private var showRotationControls = false
     
     // Ghost overlay
     @State private var ghostImage: UIImage?
     @State private var showGhost = false
     @State private var ghostOpacity: Double = 0.5
     @State private var allPhotosInJourney: [ProgressPhoto] = []
+    @State private var useLastAsGhost = false  // false = first, true = last
 
     var body: some View {
         NavigationStack {
@@ -468,7 +572,7 @@ struct PhotoAdjustSheet: View {
                         let cropH = cropW * 5/4
                         
                         ZStack {
-                            // Full image layer (dimmed, for context)
+                            // Single transformed image for entire view
                             Image(uiImage: img)
                                 .resizable()
                                 .scaledToFit()
@@ -476,99 +580,78 @@ struct PhotoAdjustSheet: View {
                                 .offset(offset)
                                 .rotationEffect(rotation)
                                 .frame(width: geo.size.width, height: geo.size.height)
-                                .opacity(0.3)
-                                .blur(radius: 3)
-                                .allowsHitTesting(false)
-
-                            // Light overlay everywhere EXCEPT the crop area (matches bottom bar translucency)
-                            Rectangle()
-                                .fill(Color.black.opacity(0.35))
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .mask(
-                                    ZStack {
-                                        Rectangle()
-                                            .fill(Color.white)
-                                        RoundedRectangle(cornerRadius: 18)
-                                            .fill(Color.black)
-                                            .frame(width: cropW, height: cropH)
-                                            .position(x: geo.size.width/2, y: geo.size.height/2)
-                                            .blendMode(.destinationOut)
-                                    }
-                                    .compositingGroup()
-                                )
-                                .allowsHitTesting(false)
-
-                            // Bright crop area with main image + ghost overlay on top
-                            ZStack {
-                                // Main image being edited (below) - fade out as ghost opacity increases
-                                Rectangle()
-                                    .fill(Color.clear)
-                                    .frame(width: cropW, height: cropH)
-                                    .overlay(
-                                        Image(uiImage: img)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .scaleEffect(scale)
-                                            .offset(offset)
-                                            .rotationEffect(rotation)
-                                            .opacity(showGhost ? (1 - ghostOpacity) : 1)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                                    .position(x: cropW/2, y: geo.size.height/2)
-                                
-                                // Ghost overlay (on top, if enabled)
-                                if showGhost, let ghost = ghostImage {
+                                .opacity(showGhost ? (1 - ghostOpacity) : 1)
+                                .overlay(
+                                    // Dimming overlay everywhere EXCEPT the crop area
                                     Rectangle()
-                                        .fill(Color.clear)
-                                        .frame(width: cropW, height: cropH)
-                                        .overlay(
-                                            Image(uiImage: ghost)
-                                                .resizable()
-                                                .scaledToFit()
-                                                .opacity(ghostOpacity)
+                                        .fill(Color.black.opacity(0.7))
+                                        .frame(width: geo.size.width, height: geo.size.height)
+                                        .mask(
+                                            ZStack {
+                                                Rectangle()
+                                                    .fill(Color.white)
+                                                Rectangle()
+                                                    .fill(Color.black)
+                                                    .frame(width: cropW, height: cropH)
+                                                    .position(x: geo.size.width/2, y: geo.size.height/2)
+                                                    .blendMode(.destinationOut)
+                                            }
+                                            .compositingGroup()
                                         )
-                                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                                        .position(x: cropW/2, y: geo.size.height/2)
                                         .allowsHitTesting(false)
-                                }
+                                )
                                 
-                                // Border and shadow on top of everything
-                                Rectangle()
-                                    .stroke(Color.white.opacity(0.5), lineWidth: 2)
-                                    .frame(width: cropW, height: cropH)
-                                    .position(x: cropW/2, y: geo.size.height/2)
+                            // Ghost overlay (if enabled)
+                            if showGhost, let ghost = ghostImage {
+                                Image(uiImage: ghost)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .opacity(ghostOpacity)
                                     .allowsHitTesting(false)
                             }
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .position(x: geo.size.width/2, y: geo.size.height/2)
-                            .gesture(
-                                SimultaneousGesture(
-                                    DragGesture()
-                                        .onChanged { value in
-                                            offset = CGSize(
-                                                width: lastOffset.width + value.translation.width,
-                                                height: lastOffset.height + value.translation.height
-                                            )
-                                        }
-                                        .onEnded { _ in
-                                            lastOffset = offset
-                                        },
-                                    MagnificationGesture()
-                                        .onChanged { value in
-                                            let newScale = lastScale * value
-                                            scale = max(minScale, newScale)
-                                            print("🔍 Zoom: \(scale) (min: \(minScale))")
-                                        }
-                                        .onEnded { _ in
-                                            lastScale = scale
-                                            print("✅ Zoom ended at: \(scale)")
-                                        }
-                                )
-                            )
-                            .gesture(
-                                RotationGesture().onChanged { rotation = $0 }
-                            )
+                            
+                            // Border on crop area
+                            Rectangle()
+                                .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                                .frame(width: cropW, height: cropH)
+                                .position(x: geo.size.width/2, y: geo.size.height/2)
+                                .allowsHitTesting(false)
                         }
+                        .contentShape(Rectangle())
+                        .gesture(
+                            SimultaneousGesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        offset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                    }
+                                    .onEnded { _ in
+                                        lastOffset = offset
+                                    },
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        let newScale = lastScale * value
+                                        scale = max(minScale, newScale)
+                                        print("🔍 Zoom: \(scale) (min: \(minScale))")
+                                    }
+                                    .onEnded { _ in
+                                        lastScale = scale
+                                        print("✅ Zoom ended at: \(scale)")
+                                    }
+                            )
+                        )
+                        .simultaneousGesture(
+                            RotationGesture()
+                                .onChanged { value in
+                                    rotation = lastRotation + value
+                                }
+                                .onEnded { _ in
+                                    lastRotation = rotation
+                                }
+                        )
                         .onChange(of: geo.size) { _, newSize in
                             // Recalculate scale when geometry changes (e.g., rotation)
                             if hasCalculatedInitialScale {
@@ -609,7 +692,7 @@ struct PhotoAdjustSheet: View {
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: "checkmark")
-                                .foregroundColor((image == nil) ? .gray : .cyan)
+                                .foregroundColor((image == nil) ? .gray : .pink)
                                 .font(.body.weight(.semibold))
                         }
                     }
@@ -621,11 +704,75 @@ struct PhotoAdjustSheet: View {
                 await loadGhostImage()
             }
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 12) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 12)
+                    
+                    // Rotation controls
+                    HStack(spacing: 20) {
+                        // Rotation toggle button
+                        Button(action: { 
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showRotationControls.toggle()
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "rotate.left")
+                                Text("Rotate")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .foregroundColor(showRotationControls ? .pink : .white.opacity(0.7))
+                        }
+                        
+                        Spacer()
+                        
+                        // Reset button
+                        Button(action: resetTransform) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("Reset")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                    
+                    // Rotation controls
+                    if showRotationControls {
+                        Spacer().frame(height: 8)
+                        VStack(spacing: 12) {
+                            // Rotation slider
+                            HStack {
+                                Image(systemName: "rotate.left")
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 20)
+                                
+                                Slider(value: Binding(
+                                    get: { rotation.degrees },
+                                    set: { newValue in 
+                                        rotation = .degrees(newValue)
+                                        lastRotation = rotation
+                                    }
+                                ), in: -45...45, step: 1)
+                                .tint(.pink)
+                                
+                                Text("\(Int(rotation.degrees))°")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 45, alignment: .trailing)
+                            }
+                        }
+                    }
+                    
                     // Ghost Overlay controls
-                    if ghostImage != nil {
+                    if ghostImage != nil || allPhotosInJourney.count > 1 {
+                        Spacer().frame(height: 12)
+                        
                         HStack(spacing: 16) {
-                            Button(action: { showGhost.toggle() }) {
+                            Button(action: { 
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    showGhost.toggle()
+                                }
+                            }) {
                                 HStack(spacing: 8) {
                                     Image(systemName: showGhost ? "eye.fill" : "eye.slash.fill")
                                     Text("Ghost Overlay")
@@ -635,6 +782,49 @@ struct PhotoAdjustSheet: View {
                             }
                             
                             Spacer()
+                            
+                            // Ghost source selector
+                            if allPhotosInJourney.count > 1 {
+                                HStack(spacing: 8) {
+                                    Text("Use:")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.5))
+                                    
+                                    Button(action: {
+                                        if useLastAsGhost {
+                                            useLastAsGhost = false
+                                            Task { await loadGhostImage() }
+                                        }
+                                    }) {
+                                        Text("First")
+                                            .font(.caption.weight(.medium))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .fill(!useLastAsGhost ? Color.cyan.opacity(0.3) : Color.white.opacity(0.1))
+                                            )
+                                            .foregroundColor(!useLastAsGhost ? .cyan : .white.opacity(0.7))
+                                    }
+                                    
+                                    Button(action: {
+                                        if !useLastAsGhost {
+                                            useLastAsGhost = true
+                                            Task { await loadGhostImage() }
+                                        }
+                                    }) {
+                                        Text("Last")
+                                            .font(.caption.weight(.medium))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .fill(useLastAsGhost ? Color.cyan.opacity(0.3) : Color.white.opacity(0.1))
+                                            )
+                                            .foregroundColor(useLastAsGhost ? .cyan : .white.opacity(0.7))
+                                    }
+                                }
+                            }
                         }
                         
                         // Slider
@@ -653,7 +843,6 @@ struct PhotoAdjustSheet: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.top, 12)
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity)
                 .background(
@@ -682,15 +871,17 @@ struct PhotoAdjustSheet: View {
         // Apply saved transform if it exists
         await MainActor.run {
             let transform = photo.alignTransform
-            if transform.scale != 1 || transform.offsetX != 0 || transform.offsetY != 0 || transform.rotation != 0 {
-                // User has previously edited this photo - restore their edits
-                scale = transform.scale
-                lastScale = transform.scale
-                // Allow zoom out further than saved level (will be constrained by minScale later)
-                offset = CGSize(width: transform.offsetX, height: transform.offsetY)
-                lastOffset = offset
-                rotation = Angle(radians: transform.rotation)
-                hasCalculatedInitialScale = true // Prevent calculateInitialScale from overwriting
+            // Always load saved transform, even if it's identity
+            scale = transform.scale > 0 ? transform.scale : 1
+            lastScale = scale
+            offset = CGSize(width: transform.offsetX, height: transform.offsetY)
+            lastOffset = offset
+            rotation = Angle(radians: transform.rotation)
+            lastRotation = rotation
+            
+            // If we have a saved transform, mark that we've calculated initial scale
+            if transform.scale > 0 {
+                hasCalculatedInitialScale = true
                 print("📸 Loaded saved transform: scale=\(transform.scale), offset=(\(transform.offsetX), \(transform.offsetY)), rotation=\(transform.rotation)")
             }
         }
@@ -710,23 +901,44 @@ struct PhotoAdjustSheet: View {
                 allPhotosInJourney = photosInJourney
             }
             
-            // Load the first photo in the journey as ghost overlay
-            guard let firstPhoto = photosInJourney.first, firstPhoto.id != photo.id else {
-                print("👻 No ghost photo available (this is the first photo)")
-                return
+            // Select ghost photo based on user preference
+            let ghostPhoto: ProgressPhoto?
+            if useLastAsGhost {
+                // Find the last (most recent) photo in the journey that isn't the current one
+                let otherPhotos = photosInJourney.filter { $0.id != photo.id }
+                ghostPhoto = otherPhotos.last  // Last in sorted array = most recent
+                
+                if ghostPhoto == nil {
+                    print("👻 No other photos available for ghost overlay")
+                    await MainActor.run { ghostImage = nil }
+                    return
+                }
+                print("👻 Loading ghost image from last photo in journey...")
+            } else {
+                // Load the first photo in the journey (if not current)
+                let otherPhotos = photosInJourney.filter { $0.id != photo.id }
+                ghostPhoto = otherPhotos.first
+                
+                if ghostPhoto == nil {
+                    print("👻 No other photos available for ghost overlay") 
+                    await MainActor.run { ghostImage = nil }
+                    return
+                }
+                print("👻 Loading ghost image from first photo...")
             }
             
-            print("👻 Loading ghost image from first photo...")
+            guard let selectedGhostPhoto = ghostPhoto else { return }
             
-            if let loadedGhost = await PhotoStore.fetchUIImage(localId: firstPhoto.assetLocalId, targetSize: nil) {
+            if let loadedGhost = await PhotoStore.fetchUIImage(localId: selectedGhostPhoto.assetLocalId, targetSize: nil) {
                 await MainActor.run {
                     // Render the ghost with its transform as a 4:5 cropped image (same as main display)
-                    let croppedGhost = renderCroppedGhostImage(from: loadedGhost, transform: firstPhoto.alignTransform)
+                    let croppedGhost = renderCroppedGhostImage(from: loadedGhost, transform: selectedGhostPhoto.alignTransform)
                     self.ghostImage = croppedGhost
                     print("👻 Ghost image loaded and cropped successfully")
                 }
             } else {
                 print("❌ Failed to load ghost image")
+                await MainActor.run { ghostImage = nil }
             }
         } catch {
             print("❌ Error fetching photos for ghost: \(error)")
@@ -776,6 +988,24 @@ struct PhotoAdjustSheet: View {
         }
     }
     
+    private func resetTransform() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            // Reset to initial fill scale
+            if let img = image {
+                let geo = UIScreen.main.bounds
+                let cropW = geo.width
+                let cropH = cropW * 5/4
+                calculateInitialScale(imageSize: img.size, cropSize: CGSize(width: cropW, height: cropH))
+                scale = minScale
+                lastScale = minScale
+            }
+            offset = .zero
+            lastOffset = .zero
+            rotation = .zero
+            lastRotation = .zero
+        }
+    }
+    
     private func calculateInitialScale(imageSize: CGSize, cropSize: CGSize) {
         // Image will be .scaledToFit() within the crop area
         // Then we apply scaleEffect to zoom it to fill
@@ -810,52 +1040,28 @@ struct PhotoAdjustSheet: View {
     }
 
     private func saveEdits() async {
-        guard let img = image else { return }
+        guard image != nil else { return }
         isSaving = true
 
-        // Generate a new cropped 4:5 image with the current transform applied
-        let croppedImage = renderCroppedImage(from: img)
-
-        do {
-            // Save the new cropped image
-            let newCroppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
-            print("✂️ Saved new cropped image")
-
-            // Update the photo record with the new cropped ID
-            await MainActor.run {
-                let oldCroppedId = photo.assetLocalId
-
-                // Update to new cropped image
-                photo.assetLocalId = newCroppedId
-
-                // Reset transform to identity since we baked it into the new cropped image
-                photo.alignTransform = .identity
-
-                do {
-                    try ctx.save()
-                    print("✅ Photo updated with new crop")
-
-                    // Clean up old cropped file after successful save
-                    if !oldCroppedId.isEmpty {
-                        Task {
-                            try? await PhotoStore.deleteFromAppDirectory(localId: oldCroppedId)
-                            print("🗑️ Deleted old cropped image")
-                        }
-                    }
-
-                    isSaving = false
-                    dismiss()
-                } catch {
-                    print("❌ Error saving photo: \(error)")
-                    errorMessage = "Failed to save edits: \(error.localizedDescription)"
-                    showErrorAlert = true
-                    isSaving = false
-                }
-            }
-        } catch {
-            await MainActor.run {
-                print("❌ Error saving cropped image: \(error)")
-                errorMessage = "Failed to save cropped image: \(error.localizedDescription)"
+        await MainActor.run {
+            // Simply save the transform without creating a new image
+            // This keeps the original image and applies the transform on display
+            photo.alignTransform = AlignTransform(
+                scale: scale,
+                offsetX: offset.width,
+                offsetY: offset.height,
+                rotation: rotation.radians
+            )
+            
+            do {
+                try ctx.save()
+                print("✅ Transform saved successfully")
+                print("📐 Saved transform: scale=\(scale), offset=(\(offset.width), \(offset.height)), rotation=\(rotation.radians)")
+                isSaving = false
+                dismiss()
+            } catch {
+                print("❌ Error saving transform: \(error)")
+                errorMessage = "Failed to save edits: \(error.localizedDescription)"
                 showErrorAlert = true
                 isSaving = false
             }
@@ -888,5 +1094,4 @@ struct PhotoAdjustSheet: View {
             sourceImage.draw(in: drawRect)
         }
     }
-    
 }

@@ -22,24 +22,22 @@ struct ImagePicker: UIViewControllerRepresentable {
         var config = PHPickerConfiguration()
         config.filter = .images
         config.selectionLimit = 0 // Allow multiple selection
-        config.selection = .ordered // This might help with selection appearance
-
+        config.selection = .ordered
+        
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
-
+        
+        // Force dark mode to ensure proper contrast (white checkmark on dark background)
+        picker.overrideUserInterfaceStyle = .dark
+        
+        // Set the tint color for the selection checkmarks
+        picker.view.tintColor = UIColor.systemBlue // Use system blue for better visibility
+        
         return picker
     }
 
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
-        // Set tint color after the view hierarchy is established
-        DispatchQueue.main.async {
-            uiViewController.view.tintColor = UIColor.cyan
-            if let navigationBar = uiViewController.navigationController?.navigationBar {
-                navigationBar.tintColor = UIColor.cyan
-            }
-            // Try to set tint on the presented view controller itself
-            uiViewController.view.window?.tintColor = UIColor.cyan
-        }
+        // No need to update anything here since we set everything in makeUIViewController
     }
     
     func makeCoordinator() -> Coordinator {
@@ -79,11 +77,12 @@ struct ImagePicker: UIViewControllerRepresentable {
                     if let image = object as? UIImage {
                         newImages.append(image)
                         
-                        // Get creation date from original asset if available
+                        // Store asset identifier for later EXIF date extraction
+                        // We'll extract the actual EXIF date when saving, not the import date
                         var creationDate: Date?
-                        if let identifier = assetIdentifier {
-                            let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
-                            creationDate = fetchResult.firstObject?.creationDate
+                        if assetIdentifier != nil {
+                            // Just store nil for now - we'll get EXIF date during save
+                            creationDate = nil
                         }
                         
                         let photoData = SelectedPhotoData(
@@ -250,7 +249,7 @@ struct ImportPhotosView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.cyan)
+                            .foregroundColor(.pink)
                             .font(.body.weight(.semibold))
                     }
                 }
@@ -272,11 +271,23 @@ struct ImportPhotosView: View {
                 do {
                     let localId: String
                     let date: Date
-                    
+
                     // For imported photos, copy them to app directory to avoid photo library dependency
                     localId = try await PhotoStore.saveToAppDirectory(photoData.image)
-                    date = photoData.creationDate ?? Date()
+
+                    // Get EXIF creation date if asset identifier is available
+                    if let assetId = photoData.assetIdentifier,
+                       let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject {
+                        date = await PhotoStore.getEXIFCreationDate(from: asset) ?? Date()
+                        print("📅 Extracted EXIF date: \(date) for photo \(index + 1)")
+                    } else {
+                        date = photoData.creationDate ?? Date()
+                    }
+
                     print("💾 Copied imported photo \(index + 1)/\(selectedPhotoData.count) to app directory")
+                    
+                    // Calculate initial transform to fill 4:5 aspect ratio
+                    let initialTransform = calculateInitialTransform(for: photoData.image.size)
                     
                     // Create progress photo entry
                     let progressPhoto = ProgressPhoto(
@@ -284,7 +295,7 @@ struct ImportPhotosView: View {
                         date: date,
                         assetLocalId: localId,
                         isFrontCamera: false, // Assume imported photos are not selfies
-                        alignTransform: .identity
+                        alignTransform: initialTransform
                     )
                     progressPhoto.journey = journey  // Set the relationship
                     
@@ -323,6 +334,30 @@ struct ImportPhotosView: View {
                 dismiss()
             }
         }
+    }
+    
+    /// Calculate initial transform to automatically fill 4:5 aspect ratio
+    private func calculateInitialTransform(for imageSize: CGSize) -> AlignTransform {
+        let imageAspect = imageSize.width / imageSize.height
+        let targetAspect: CGFloat = 4.0 / 5.0  // 4:5 crop ratio
+        
+        // Calculate scale needed to fill the 4:5 frame
+        let fillScale: CGFloat
+        if imageAspect > targetAspect {
+            // Image is wider than 4:5 - scale by height to fill
+            fillScale = imageAspect / targetAspect
+        } else {
+            // Image is taller than 4:5 - scale by width to fill
+            fillScale = targetAspect / imageAspect
+        }
+        
+        // Return transform with calculated scale to auto-crop to 4:5
+        return AlignTransform(
+            scale: fillScale,
+            offsetX: 0,
+            offsetY: 0,
+            rotation: 0
+        )
     }
 }
 

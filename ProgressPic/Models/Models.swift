@@ -40,6 +40,7 @@ final class Journey {
     var coverAssetLocalId: String? = nil   // PHAsset localIdentifier
     var saveToCameraRoll: Bool = false
     var template: String? = nil
+    var sortOrder: Int = 0  // For manual reordering
 
     @Relationship(deleteRule: .cascade, inverse: \ProgressPhoto.journey) var photos: [ProgressPhoto]? = []
     @Relationship(deleteRule: .cascade, inverse: \MeasurementEntry.journey) var measurements: [MeasurementEntry]? = []
@@ -48,12 +49,14 @@ final class Journey {
     init(name: String,
          createdAt: Date = .now,
          saveToCameraRoll: Bool = false,
-         template: String? = nil) {
+         template: String? = nil,
+         sortOrder: Int = 0) {
         self.id = UUID()
         self.name = name
         self.createdAt = createdAt
         self.saveToCameraRoll = saveToCameraRoll
         self.template = template
+        self.sortOrder = sortOrder
     }
 }
 

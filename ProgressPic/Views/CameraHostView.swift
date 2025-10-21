@@ -27,12 +27,42 @@ struct CameraHostView: View {
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var gridEnabled = false
+    @State private var selectedZoomLevel: CGFloat = 1.0
 
     init(journey: Journey? = nil) {
         self._selectedJourney = State(initialValue: journey)
     }
     
+    // MARK: - Properties
+    
+    private var zoomLevels: [CGFloat] {
+        // Only show 0.5x if ultra-wide camera is available
+        return camera.hasUltraWideCamera ? [0.5, 1.0, 2.0] : [1.0, 2.0]
+    }
+    
     // MARK: - Computed Views
+    
+    @ViewBuilder
+    private var zoomControlsView: some View {
+        if !camera.isFront {
+            // Use HStack directly with proper alignment
+            HStack(spacing: 15) {
+                ForEach(zoomLevels, id: \.self) { level in
+                    Button(action: { selectZoomLevel(level) }) {
+                        Text(formatZoomLevel(level))
+                            .font(.system(size: 14, weight: selectedZoomLevel == level ? .semibold : .regular))
+                            .foregroundColor(selectedZoomLevel == level ? .yellow : .white.opacity(0.6))
+                            .frame(width: 44, height: 44)  // Larger tap area
+                            .contentShape(Rectangle())  // Make entire frame tappable
+                            .scaleEffect(selectedZoomLevel == level ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedZoomLevel)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 15)
+        }
+    }
     
     private var cameraPreviewSection: some View {
         GeometryReader { geometry in
@@ -78,26 +108,29 @@ struct CameraHostView: View {
                 if timerActive && countdownSeconds > 0 {
                     Text("\(countdownSeconds)")
                         .font(.system(size: 120, weight: .bold))
-                        .foregroundColor(.white)
-                        .shadow(color: .black, radius: 10)
+                        .foregroundColor(.yellow)
+                        .shadow(color: .black.opacity(0.5), radius: 15, x: 0, y: 2)
                 }
                 
-                // Overlaid ghost and timer controls on the camera
-                VStack {
-                    Spacer()
-                    
-                    VStack(spacing: 12) {
-                        // Ghost controls (when active) - overlaid on camera
+                // Overlaid ghost and timer controls on the left side
+                HStack {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Spacer()
+                        
+                        // Ghost controls (when active) - on the left
                         if showGhostControls && ghostEnabled {
                             ghostControlsView
                         }
                         
-                        // Timer controls (when active) - overlaid on camera
+                        // Timer controls (when active) - on the left
                         if showTimerControls {
                             timerControlsView
                         }
                     }
-                    .padding(.bottom, 220)
+                    .padding(.leading, AppStyle.Spacing.lg)
+                    .padding(.bottom, 200) // Position above bottom controls
+                    
+                    Spacer()
                 }
                 .frame(width: cropW, height: cropH)
             }
@@ -205,9 +238,9 @@ struct CameraHostView: View {
                         showTimerControls.toggle()
                         if showTimerControls { showGhostControls = false }
                     }) {
-                        Image(systemName: timerActive ? "timer.circle.fill" : "timer")
+                        Image(systemName: "timer")
                             .font(.system(size: AppStyle.IconSize.xl))
-                            .foregroundColor(timerActive ? .orange : AppStyle.Colors.textPrimary)
+                            .foregroundColor((timerSeconds > 0 || timerActive) ? .yellow : AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
                     
@@ -234,6 +267,9 @@ struct CameraHostView: View {
             // Bottom center controls - shutter button and thumbnail (above tab bar)
             VStack {
                 Spacer()
+                
+                // Zoom controls - only show for back camera
+                zoomControlsView
                 
                 HStack(spacing: AppStyle.Spacing.xxxl) {
                     // Left: Thumbnail preview
@@ -289,7 +325,7 @@ struct CameraHostView: View {
         .background(AppStyle.Colors.bgDark)
         .onAppear {
             print("👁️ CameraHostView appeared")
-            
+
             // Initialize camera when view appears
             Task {
                 // Setup journey first (sync, fast)
@@ -297,22 +333,28 @@ struct CameraHostView: View {
                     selectedJourney = firstJourney
                 }
                 fetchPhotosForSelectedJourney()
-                
+
                 // Request camera permission if needed (first time only)
                 if !camera.isAuthorized {
                     print("🔐 Requesting camera permission...")
                     await camera.requestPermissionIfNeeded()
                 }
-                
-                // Start camera session (works for both first time and returning from other views)
-                if camera.isAuthorized {
-                    print("▶️ Starting/Restarting camera session...")
+
+                // Start camera session if authorized and not already running
+                // This handles initial app launch on camera tab
+                if camera.isAuthorized && !camera.session.isRunning {
+                    print("▶️ Starting camera session on appear...")
                     camera.start()
                 }
 
                 // Load thumbnails (no permission needed for app directory)
                 startLoadingGhost()
                 await loadLatestThumbnail()
+                
+                // Initialize zoom button position and ensure 1x is selected
+                if !camera.isFront {
+                    selectedZoomLevel = 1.0
+                }
             }
             
             // Observe device orientation changes
@@ -350,6 +392,32 @@ struct CameraHostView: View {
                     lastGhost = nil
                 }
             }
+            
+            // Observe zoom changes from pinch gesture
+            NotificationCenter.default.addObserver(
+                forName: Notification.Name("CameraZoomChanged"),
+                object: nil,
+                queue: .main
+            ) { notification in
+                if let zoom = notification.userInfo?["zoom"] as? CGFloat {
+                    // Determine which zoom button to highlight based on actual zoom
+                    let buttonToHighlight: CGFloat
+                    if zoom < 0.75 {
+                        buttonToHighlight = 0.5
+                    } else if zoom < 1.5 {
+                        buttonToHighlight = 1.0
+                    } else {
+                        buttonToHighlight = 2.0
+                    }
+                    
+                    // Only update if it exists in our zoom levels
+                    if zoomLevels.contains(buttonToHighlight) && selectedZoomLevel != buttonToHighlight {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            selectedZoomLevel = buttonToHighlight
+                        }
+                    }
+                }
+            }
         }
         .onDisappear {
             print("👋 CameraHostView disappeared - clearing resources")
@@ -383,13 +451,29 @@ struct CameraHostView: View {
             print("📹 Camera authorization changed: \(ok)")
         }
         .onChange(of: selectedJourney) { _, newJourney in
-            // Fetch photos when journey changes
-            fetchPhotosForSelectedJourney()
-            
-            // Reload ghost and thumbnail for new journey
-            startLoadingGhost()
-            Task {
+            // Fetch photos when journey changes - do it async to avoid blocking UI during menu interaction
+            // This makes the Menu dismiss smoothly
+            Task { @MainActor in
+                // Small delay to let the menu dismiss animation complete
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+
+                // Fetch photos (must be on main actor for SwiftData)
+                fetchPhotosForSelectedJourney()
+
+                // Load ghost and thumbnail in background (these are already async)
+                startLoadingGhost()
                 await loadLatestThumbnail()
+            }
+        }
+        .onChange(of: camera.isFront) { _, isFront in
+            // Reset zoom when switching cameras
+            if isFront {
+                selectedZoomLevel = 1.0
+                camera.setZoom(1.0)
+            } else {
+                // Initialize zoom controls position for back camera
+                selectedZoomLevel = 1.0
+                camera.setZoom(1.0)
             }
         }
         .onChange(of: camera.latestPhoto) { _, newPhoto in
@@ -547,6 +631,28 @@ struct CameraHostView: View {
         }
     }
     
+    func formatZoomLevel(_ level: CGFloat) -> String {
+        if level == 1.0 {
+            return "1×"
+        } else if level < 1.0 {
+            return String(format: "%.1f×", level)
+        } else {
+            return String(format: "%.0f×", level)
+        }
+    }
+    
+    func selectZoomLevel(_ level: CGFloat) {
+        print("🎯 User selected zoom level: \(level)x")
+        
+        // Update UI immediately
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            selectedZoomLevel = level
+        }
+        
+        // Trigger camera zoom change
+        camera.setZoom(level)
+    }
+    
     func capturePhoto() {
         print("📸 Capture button pressed")
         camera.capturePhoto()
@@ -575,55 +681,58 @@ struct CameraHostView: View {
     }
     
     var timerControlsView: some View {
-        HStack(spacing: AppStyle.Spacing.sm) {
+        VStack(spacing: AppStyle.Spacing.md) {
             ForEach([0,3,5,10], id: \.self) { sec in
                 Button {
-                    timerSeconds = sec
-                    showTimerControls = false
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        timerSeconds = sec
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        showTimerControls = false
+                    }
                 } label: {
-                    Text(sec == 0 ? "Off" : "\(sec)s")
-                        .font(AppStyle.FontStyle.captionBold)
-                        .foregroundColor(AppStyle.Colors.textPrimary)
-                        .padding(.horizontal, AppStyle.Spacing.sm)
-                        .padding(.vertical, AppStyle.Spacing.sm)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppStyle.Corner.md)
-                                .fill(sec == timerSeconds ? Color.white.opacity(0.15) : Color.white.opacity(0.04))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppStyle.Corner.md)
-                                .stroke(sec == timerSeconds ? Color.white.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 1)
-                        )
+                    ZStack {
+                        Circle()
+                            .fill(sec == timerSeconds ? Color.yellow.opacity(0.15) : Color.black.opacity(0.25))
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                        
+                        Circle()
+                            .strokeBorder(sec == timerSeconds ? Color.yellow : Color.white.opacity(0.2), lineWidth: 1)
+                            .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
+                        
+                        Text(sec == 0 ? "Off" : "\(sec)s")
+                            .font(.system(size: 14, weight: sec == timerSeconds ? .semibold : .medium))
+                            .foregroundColor(sec == timerSeconds ? Color.yellow : AppStyle.Colors.textPrimary)
+                    }
+                    .scaleEffect(sec == timerSeconds ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: timerSeconds)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(AppStyle.Spacing.sm)
-        .background(
-            Capsule()
-                .fill(Color.black.opacity(0.5))
-        )
     }
     
     var ghostControlsView: some View {
-        HStack(spacing: AppStyle.Spacing.md) {
-            // Ghost opacity slider
-            HStack(spacing: 6) {
-                Image(systemName: "eye.slash")
-                    .font(.system(size: 14))
+        VStack(spacing: AppStyle.Spacing.md) {
+            // Ghost opacity slider - vertical orientation
+            VStack(spacing: 8) {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 15))
                     .foregroundColor(AppStyle.Colors.textPrimary)
                 Slider(value: $ghostOpacity, in: 0...1)
-                    .frame(width: 80)
+                    .frame(width: 140)
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 30, height: 140)
                     .accentColor(AppStyle.Colors.accentCyan)
-                Image(systemName: "eye.fill")
-                    .font(.system(size: 14))
+                Image(systemName: "eye.slash")
+                    .font(.system(size: 15))
                     .foregroundColor(AppStyle.Colors.textPrimary)
             }
-            .padding(.horizontal, AppStyle.Spacing.md)
-            .padding(.vertical, AppStyle.Spacing.sm)
+            .padding(.vertical, AppStyle.Spacing.md)
+            .padding(.horizontal, AppStyle.Spacing.sm)
             .background(
-                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                    .fill(Color.black.opacity(0.5))
+                RoundedRectangle(cornerRadius: AppStyle.Corner.md)
+                    .fill(Color.black.opacity(0.25))
             )
             
             // First/Last toggle
@@ -631,18 +740,18 @@ struct CameraHostView: View {
                 useFirst.toggle()
                 startLoadingGhost()
             }) {
-                HStack(spacing: 6) {
+                VStack(spacing: 4) {
                     Image(systemName: useFirst ? "1.circle.fill" : "arrow.clockwise")
-                        .font(.system(size: 14))
+                        .font(.system(size: 16))
                     Text(useFirst ? "First" : "Last")
-                        .font(AppStyle.FontStyle.captionBold)
+                        .font(AppStyle.FontStyle.caption)
                 }
                 .foregroundColor(AppStyle.Colors.textPrimary)
-                .padding(.horizontal, AppStyle.Spacing.md)
+                .frame(width: 50)
                 .padding(.vertical, AppStyle.Spacing.sm)
                 .background(
-                    RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
-                        .fill(Color.black.opacity(0.5))
+                    RoundedRectangle(cornerRadius: AppStyle.Corner.md)
+                        .fill(Color.black.opacity(0.25))
                 )
             }
         }
@@ -697,11 +806,18 @@ struct CameraPreviewLayerView: UIViewRepresentable {
                 
                 device.unlockForConfiguration()
                 
-                // Update published zoom values
+                // Update published zoom values and sync with parent view
                 if gesture.state == .ended || gesture.state == .changed {
                     DispatchQueue.main.async {
                         self.cameraService.currentZoom = newZoom
                         self.cameraService.maxZoom = maxZoom
+                        
+                        // Update selected zoom level in parent view to sync the buttons
+                        NotificationCenter.default.post(
+                            name: Notification.Name("CameraZoomChanged"),
+                            object: nil,
+                            userInfo: ["zoom": newZoom]
+                        )
                     }
                 }
             } catch {

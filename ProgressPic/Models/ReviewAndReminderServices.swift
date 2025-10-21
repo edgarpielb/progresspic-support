@@ -70,13 +70,16 @@ enum ReminderManager {
                 return
             }
 
-            // Cancel all old notifications for this journey
-            UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
-                let journeyIds = requests
-                    .filter { $0.identifier.hasPrefix(journey.id.uuidString) }
-                    .map { $0.identifier }
-                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: journeyIds)
-            }
+            // Capture values to avoid Sendable issues
+            let journeyId = journey.id.uuidString
+            let journeyName = journey.name
+            
+            // Cancel all old notifications for this journey using async API
+            let requests = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            let journeyNotificationIds = requests
+                .filter { $0.identifier.hasPrefix(journeyId) }
+                .map { $0.identifier }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: journeyNotificationIds)
 
             // Schedule notifications for each reminder
             guard let reminders = journey.reminders else { return }
@@ -97,11 +100,11 @@ enum ReminderManager {
 
                     let content = UNMutableNotificationContent()
                     content.title = reminder.notificationText
-                    content.body = "Add today's photo to \(journey.name)."
+                    content.body = "Add today's photo to \(journeyName)."
                     content.sound = .default
 
                     let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-                    let id = "\(journey.id.uuidString)-\(reminder.id.uuidString)-\(day)"
+                    let id = "\(journeyId)-\(reminder.id.uuidString)-\(day)"
 
                     try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
                 }

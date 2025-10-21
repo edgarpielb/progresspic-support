@@ -364,7 +364,6 @@ private struct EnhancedDayBubble: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .shadow(color: .pink.opacity(0.5), radius: 8, x: 0, y: 4)
                 } else {
                     Circle()
                         .fill(Color.white.opacity(0.05))

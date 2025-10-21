@@ -8,7 +8,15 @@ struct JourneyWatchSheet: View {
     let journey: Journey
     let photos: [ProgressPhoto]
     @Environment(\.dismiss) private var dismiss
-    
+    @State private var isExporting = false
+    @State private var exportProgress: Double = 0
+    @State private var exportedVideoURL: URL?
+
+    // Reverse photos to show oldest → newest (chronological order), excluding hidden
+    private var chronologicalPhotos: [ProgressPhoto] {
+        photos.filter { !$0.isHidden }.sorted { $0.date < $1.date }
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -16,24 +24,87 @@ struct JourneyWatchSheet: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    Spacer().frame(height: 24)
+                    Spacer().frame(height: 8)
 
-                    JourneyWatchView(journey: journey, photos: photos)
-                        .padding()
+                    JourneyWatchView(
+                        journey: journey,
+                        photos: photos,
+                        isExporting: $isExporting,
+                        exportProgress: $exportProgress,
+                        exportedVideoURL: $exportedVideoURL
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
                 }
             }
             .navigationTitle("Watch Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: {
+                        Task {
+                            await exportVideo()
+                        }
+                    }) {
+                        if isExporting {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundColor(.white)
+                                .font(.title3)
+                        }
+                    }
+                    .disabled(isExporting || chronologicalPhotos.count < 2)
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.white)
+                            .foregroundColor(.pink)
                     }
                 }
+            }
+        }
+        .sheet(item: $exportedVideoURL) { url in
+            if #available(iOS 16.0, *) {
+                ShareSheet(url: url)
+            }
+        }
+    }
+
+    private func exportVideo() async {
+        await MainActor.run {
+            isExporting = true
+            exportProgress = 0
+        }
+
+        // Capture needed data before detached task to avoid Sendable warnings
+        let photosToExport = chronologicalPhotos
+        let journeyName = journey.name
+
+        // Run export on background queue
+        let result = await Task.detached {
+            return await VideoExporter.exportProgressVideo(
+                photos: photosToExport,
+                journeyName: journeyName,
+                playbackSpeed: 1.0,
+                progressCallback: { progress in
+                    Task { @MainActor in
+                        exportProgress = progress
+                    }
+                }
+            )
+        }.value
+
+        await MainActor.run {
+            isExporting = false
+            if let url = result {
+                exportedVideoURL = url
             }
         }
     }
@@ -43,19 +114,81 @@ struct JourneyWatchSheet: View {
 struct JourneyWatchView: View {
     let journey: Journey
     let photos: [ProgressPhoto]
+    @Binding var isExporting: Bool
+    @Binding var exportProgress: Double
+    @Binding var exportedVideoURL: URL?
+
     @State private var isPlaying = false
     @State private var currentIndex = 0
     @State private var playbackSpeed: Double = 1.0
-    @State private var showExportSheet = false
-    @State private var isExporting = false
-    @State private var exportProgress: Double = 0
-    @State private var exportedVideoURL: URL?
     
+    // Customization options
+    @State private var showDateOverlay = false
+    @State private var datePosition: DatePosition = .bottomLeft
+    @State private var dateFormat: DateFormat = .classic
+    @State private var dateFont: DateFont = .system
+    @State private var dateColor: Color = .white
+    @State private var showWatermark = false
+    @State private var reversePlayback = false
+    @State private var useCrossfade = false
+    @State private var activeSettingsPanel: SettingsPanel? = nil
+    
+    enum SettingsPanel: String {
+        case speed, date, animation, watermark
+    }
+    
+    enum DatePosition: String, CaseIterable {
+        case topLeft = "Top Left"
+        case topRight = "Top Right"
+        case bottomLeft = "Bottom Left"
+        case bottomRight = "Bottom Right"
+    }
+    
+    enum DateFormat: String, CaseIterable {
+        case classic = "Classic"
+        case short = "Short"
+        case medium = "Medium"
+        case full = "Full"
+        
+        func format(_ date: Date) -> String {
+            switch self {
+            case .classic:
+                return date.formatted(date: .abbreviated, time: .omitted)
+            case .short:
+                return date.formatted(.dateTime.month(.abbreviated).day())
+            case .medium:
+                return date.formatted(.dateTime.month(.wide).day().year())
+            case .full:
+                return date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+            }
+        }
+    }
+    
+    enum DateFont: String, CaseIterable {
+        case system = "System"
+        case rounded = "Rounded"
+        case serif = "Serif"
+        case mono = "Mono"
+        
+        var font: Font {
+            switch self {
+            case .system:
+                return .system(.caption, design: .default, weight: .bold)
+            case .rounded:
+                return .system(.caption, design: .rounded, weight: .bold)
+            case .serif:
+                return .system(.caption, design: .serif, weight: .bold)
+            case .mono:
+                return .system(.caption, design: .monospaced, weight: .bold)
+            }
+        }
+    }
+
     // Reverse photos to show oldest → newest (chronological order), excluding hidden
     private var chronologicalPhotos: [ProgressPhoto] {
         photos.filter { !$0.isHidden }.sorted { $0.date < $1.date }
     }
-    
+
     var body: some View {
         VStack(spacing: AppStyle.Spacing.lg) {
             if chronologicalPhotos.isEmpty {
@@ -71,14 +204,16 @@ struct JourneyWatchView: View {
                 startPlayback()
             }
         }
+        .onChange(of: reversePlayback) { _, _ in
+            // When changing direction, make sure we're within bounds
+            if currentIndex >= chronologicalPhotos.count && !chronologicalPhotos.isEmpty {
+                currentIndex = chronologicalPhotos.count - 1
+            }
+        }
         .onDisappear {
             isPlaying = false
         }
-        .sheet(item: $exportedVideoURL) { url in
-            if #available(iOS 16.0, *) {
-                ShareSheet(url: url)
-            }
-        }
+        .animation(.easeInOut(duration: 0.2), value: activeSettingsPanel)
     }
     
     private var emptyState: some View {
@@ -99,11 +234,9 @@ struct JourneyWatchView: View {
     }
     
     private var singlePhotoState: some View {
-        VStack(spacing: AppStyle.Spacing.lg) {
+        VStack(spacing: 8) {
             PhotoGridItem(photo: chronologicalPhotos[0])
                 .frame(maxWidth: .infinity)
-                .frame(height: 500)
-                .glassCard()
             
             Text("1 / 1 • \(chronologicalPhotos[0].date.formatted(date: .abbreviated, time: .omitted))")
                 .font(AppStyle.FontStyle.caption)
@@ -116,32 +249,88 @@ struct JourneyWatchView: View {
     }
     
     private var normalState: some View {
-        VStack(spacing: AppStyle.Spacing.lg) {
-            // Main photo display with overlay play button
+        VStack(spacing: 8) {
+            // Main photo display with overlay play/pause button
             if currentIndex < chronologicalPhotos.count {
-                ZStack {
-                    PhotoGridItem(photo: chronologicalPhotos[currentIndex])
+                let displayIndex = reversePlayback ? (chronologicalPhotos.count - 1 - currentIndex) : currentIndex
+                let displayPhoto = chronologicalPhotos[displayIndex]
+                
+                ZStack(alignment: .bottomTrailing) {
+                    PhotoGridItem(photo: displayPhoto)
                         .frame(maxWidth: .infinity)
-                        .glassCard()
-
-                    // Overlay play button on the image (only when not playing)
-                    if !isPlaying {
-                        Button(action: {
-                            isPlaying = true
-                        }) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 64))
-                                .foregroundColor(.white)
-                                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 2)
+                        .id(displayPhoto.id)
+                        .opacity(useCrossfade && isPlaying ? 0.95 : 1.0)
+                        .animation(useCrossfade ? .easeInOut(duration: 0.3) : nil, value: currentIndex)
+                    
+                    // Date overlay
+                    if showDateOverlay {
+                        GeometryReader { geometry in
+                            let dateText = dateFormat.format(displayPhoto.date)
+                            let xPosition: CGFloat = {
+                                switch datePosition {
+                                case .topLeft, .bottomLeft:
+                                    return 16
+                                case .topRight, .bottomRight:
+                                    return geometry.size.width - 16
+                                }
+                            }()
+                            let yPosition: CGFloat = {
+                                switch datePosition {
+                                case .topLeft, .topRight:
+                                    return 16
+                                case .bottomLeft, .bottomRight:
+                                    return geometry.size.height - 40
+                                }
+                            }()
+                            
+                            Text(dateText)
+                                .font(dateFont.font)
+                                .foregroundColor(dateColor)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.black.opacity(0.5))
+                                )
+                                .position(x: xPosition + (datePosition == .topRight || datePosition == .bottomRight ? -60 : 60), 
+                                         y: yPosition)
                         }
-                        .accessibilityLabel("Play slideshow")
-                        .accessibilityHint("Play through all \(chronologicalPhotos.count) photos from oldest to newest")
                     }
+                    
+                    // Watermark
+                    if showWatermark {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Text("ProgressPic")
+                                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                Spacer()
+                            }
+                        }
+                        .padding(12)
+                    }
+
+                    // Overlay play/pause button in bottom right corner
+                    Button(action: {
+                        isPlaying.toggle()
+                    }) {
+                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 2)
+                    }
+                    .padding(16)
+                    .accessibilityLabel(isPlaying ? "Pause slideshow" : "Play slideshow")
+                    .accessibilityHint(isPlaying ? "Pause the slideshow" : "Play through all \(chronologicalPhotos.count) photos")
                 }
             }
 
             // Position indicator: "1 / N • Date"
-            Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[currentIndex].date.formatted(date: .abbreviated, time: .omitted))")
+            let displayIdx = reversePlayback ? (chronologicalPhotos.count - 1 - currentIndex) : currentIndex
+            Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[displayIdx].date.formatted(date: .abbreviated, time: .omitted))")
                 .font(AppStyle.FontStyle.caption)
                 .foregroundColor(AppStyle.Colors.textSecondary)
             
@@ -198,138 +387,270 @@ struct JourneyWatchView: View {
                 .accessibilityLabel("Next photo")
                 .accessibilityHint("Go to the next photo in the slideshow")
             }
-            .padding(.horizontal)
 
-            // Speed control
-            VStack(spacing: 8) {
-                Text("Playback Speed")
-                    .font(AppStyle.FontStyle.caption)
-                    .foregroundColor(AppStyle.Colors.textSecondary)
-
-                HStack(spacing: 12) {
-                    Button(action: { playbackSpeed = 0.5 }) {
-                        Text("0.5x")
-                            .font(AppStyle.FontStyle.caption.bold())
-                            .foregroundColor(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(playbackSpeed == 0.5 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
-                                    )
-                            )
+            // Control icons
+            HStack(spacing: 16) {
+                // Speed control icon
+                ControlIconButton(
+                    icon: "speedometer",
+                    label: "Speed",
+                    isActive: activeSettingsPanel == .speed,
+                    action: {
+                        activeSettingsPanel = activeSettingsPanel == .speed ? nil : .speed
                     }
-
-                    Button(action: { playbackSpeed = 1.0 }) {
-                        Text("1x")
-                            .font(AppStyle.FontStyle.caption.bold())
-                            .foregroundColor(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(playbackSpeed == 1.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
-                                    )
-                            )
+                )
+                
+                // Reverse playback toggle
+                ControlIconButton(
+                    icon: "arrow.uturn.backward",
+                    label: "Reverse",
+                    isActive: reversePlayback,
+                    action: {
+                        reversePlayback.toggle()
+                        // Reset to appropriate index when toggling
+                        if reversePlayback && currentIndex == chronologicalPhotos.count - 1 {
+                            currentIndex = 0
+                        } else if !reversePlayback && currentIndex == 0 {
+                            currentIndex = chronologicalPhotos.count - 1
+                        }
                     }
-
-                    Button(action: { playbackSpeed = 2.0 }) {
-                        Text("2x")
-                            .font(AppStyle.FontStyle.caption.bold())
-                            .foregroundColor(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(playbackSpeed == 2.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
-                                    )
-                            )
+                )
+                
+                // Animation settings
+                ControlIconButton(
+                    icon: "wand.and.rays",
+                    label: "Effects",
+                    isActive: activeSettingsPanel == .animation,
+                    action: {
+                        activeSettingsPanel = activeSettingsPanel == .animation ? nil : .animation
                     }
-
-                    Button(action: { playbackSpeed = 5.0 }) {
-                        Text("5x")
-                            .font(AppStyle.FontStyle.caption.bold())
-                            .foregroundColor(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(playbackSpeed == 5.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
-                                    )
-                            )
+                )
+                
+                // Date overlay settings
+                ControlIconButton(
+                    icon: "calendar.badge.clock",
+                    label: "Date",
+                    isActive: showDateOverlay || activeSettingsPanel == .date,
+                    action: {
+                        if !showDateOverlay {
+                            showDateOverlay = true
+                            activeSettingsPanel = .date
+                        } else {
+                            activeSettingsPanel = activeSettingsPanel == .date ? nil : .date
+                        }
                     }
-
-                    Button(action: { playbackSpeed = 10.0 }) {
-                        Text("10x")
-                            .font(AppStyle.FontStyle.caption.bold())
-                            .foregroundColor(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(playbackSpeed == 10.0 ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
-                                    )
-                            )
+                )
+                
+                // Watermark toggle
+                ControlIconButton(
+                    icon: "drop.fill",
+                    label: "Watermark",
+                    isActive: showWatermark,
+                    action: {
+                        showWatermark.toggle()
+                    }
+                )
+            }
+            
+            // Expandable settings panels
+            if let panel = activeSettingsPanel {
+                VStack(spacing: 12) {
+                    switch panel {
+                    case .speed:
+                        speedSettingsPanel
+                    case .date:
+                        dateSettingsPanel
+                    case .animation:
+                        animationSettingsPanel
+                    case .watermark:
+                        EmptyView()
                     }
                 }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.2), value: activeSettingsPanel)
             }
-            .padding(.horizontal)
 
-            // Export button
+            // Export progress indicator (only shows when exporting)
             if isExporting {
                 VStack(spacing: 8) {
                     ProgressView(value: exportProgress, total: 1.0)
                         .progressViewStyle(.linear)
                         .tint(AppStyle.Colors.accentCyan)
-                    
+
                     Text("Exporting: \(Int(exportProgress * 100))%")
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textSecondary)
                 }
                 .padding()
                 .glassCard()
-            } else {
-                Button(action: {
-                    Task {
-                        await exportVideo()
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: AppStyle.IconSize.lg))
-                        Text("Export Video")
-                            .font(AppStyle.FontStyle.headline)
-                    }
-                    .foregroundColor(AppStyle.Colors.textPrimary)
-                    .padding(.horizontal, AppStyle.Spacing.xl)
-                    .padding(.vertical, AppStyle.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
-                            .fill(AppStyle.Colors.panel)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppStyle.Corner.lg)
-                                    .stroke(AppStyle.Colors.border, lineWidth: 1)
+            }
+        }
+    }
+    
+    // Settings panels
+    private var speedSettingsPanel: some View {
+        VStack(spacing: 8) {
+            Text("Playback Speed")
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textSecondary)
+            
+            HStack(spacing: 8) {
+                ForEach([0.5, 1.0, 2.0, 5.0, 10.0, 20.0], id: \.self) { speed in
+                    Button(action: { playbackSpeed = speed }) {
+                        Text(speed < 1.0 ? String(format: "%.1fx", speed) : "\(Int(speed))x")
+                            .font(AppStyle.FontStyle.caption.bold())
+                            .foregroundColor(playbackSpeed == speed ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(playbackSpeed == speed ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(playbackSpeed == speed ? AppStyle.Colors.accentCyan : AppStyle.Colors.border, lineWidth: 1)
+                                    )
                             )
-                    )
+                    }
                 }
             }
         }
-        .padding(.horizontal)
+    }
+    
+    private var dateSettingsPanel: some View {
+        VStack(spacing: 12) {
+            // Date on/off toggle
+            HStack {
+                Text("Show Date")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                Spacer()
+                Toggle("", isOn: $showDateOverlay)
+                    .labelsHidden()
+                    .tint(AppStyle.Colors.accentCyan)
+                    .scaleEffect(0.8)
+            }
+            
+            if showDateOverlay {
+                // Position selector
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Position")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    
+                    HStack(spacing: 8) {
+                        ForEach(DatePosition.allCases, id: \.self) { position in
+                            Button(action: { datePosition = position }) {
+                                Text(position.rawValue)
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundColor(datePosition == position ? .white : AppStyle.Colors.textSecondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(datePosition == position ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
+                                    )
+                            }
+                        }
+                    }
+                }
+                
+                // Format selector
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Format")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    
+                    HStack(spacing: 8) {
+                        ForEach(DateFormat.allCases, id: \.self) { format in
+                            Button(action: { dateFormat = format }) {
+                                Text(format.rawValue)
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundColor(dateFormat == format ? .white : AppStyle.Colors.textSecondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(dateFormat == format ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
+                                    )
+                            }
+                        }
+                    }
+                }
+                
+                // Font selector
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Font")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    
+                    HStack(spacing: 8) {
+                        ForEach(DateFont.allCases, id: \.self) { font in
+                            Button(action: { dateFont = font }) {
+                                Text(font.rawValue)
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundColor(dateFont == font ? .white : AppStyle.Colors.textSecondary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(dateFont == font ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
+                                    )
+                            }
+                        }
+                    }
+                }
+                
+                // Color selector
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Color")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    
+                    HStack(spacing: 8) {
+                        ForEach([Color.white, Color.black, Color.cyan, Color.pink, Color.yellow], id: \.self) { color in
+                            Button(action: { dateColor = color }) {
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 24, height: 24)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(dateColor == color ? AppStyle.Colors.accentCyan : Color.white.opacity(0.2), lineWidth: 2)
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private var animationSettingsPanel: some View {
+        VStack(spacing: 12) {
+            // Crossfade toggle
+            HStack {
+                Text("Crossfade")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+                Spacer()
+                Toggle("", isOn: $useCrossfade)
+                    .labelsHidden()
+                    .tint(AppStyle.Colors.accentCyan)
+                    .scaleEffect(0.8)
+            }
+            
+            Text("More effects coming soon")
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textTertiary)
+        }
     }
     
     private func startPlayback() {
@@ -337,48 +658,54 @@ struct JourneyWatchView: View {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + (1.0 / playbackSpeed)) {
             if self.isPlaying {
-                if self.currentIndex < self.chronologicalPhotos.count - 1 {
-                    self.currentIndex += 1
-                    self.startPlayback()
+                if self.reversePlayback {
+                    // Reverse playback
+                    if self.currentIndex < self.chronologicalPhotos.count - 1 {
+                        self.currentIndex += 1
+                    } else {
+                        self.currentIndex = 0
+                    }
                 } else {
-                    // Loop back to start
-                    self.currentIndex = 0
-                    self.startPlayback()
+                    // Normal playback
+                    if self.currentIndex < self.chronologicalPhotos.count - 1 {
+                        self.currentIndex += 1
+                    } else {
+                        self.currentIndex = 0
+                    }
                 }
+                self.startPlayback()
             }
         }
     }
+}
+
+// MARK: - Control Icon Button
+struct ControlIconButton: View {
+    let icon: String
+    let label: String
+    let isActive: Bool
+    let action: () -> Void
     
-    private func exportVideo() async {
-        await MainActor.run {
-            isExporting = true
-            exportProgress = 0
-        }
-
-        // Capture needed data before detached task to avoid Sendable warnings
-        let photosToExport = chronologicalPhotos
-        let journeyName = journey.name
-        let speed = playbackSpeed
-
-        // Run export on background queue
-        let result = await Task.detached {
-            return await VideoExporter.exportProgressVideo(
-                photos: photosToExport,
-                journeyName: journeyName,
-                playbackSpeed: speed,
-                progressCallback: { progress in
-                    Task { @MainActor in
-                        exportProgress = progress
-                    }
-                }
-            )
-        }.value
-        
-        await MainActor.run {
-            isExporting = false
-            if let url = result {
-                exportedVideoURL = url
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(isActive ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
+                
+                Text(label)
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundColor(isActive ? AppStyle.Colors.accentCyan : AppStyle.Colors.textTertiary)
             }
+            .frame(width: 60, height: 50)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isActive ? AppStyle.Colors.accentCyan.opacity(0.15) : Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isActive ? AppStyle.Colors.accentCyan : Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
         }
     }
 }

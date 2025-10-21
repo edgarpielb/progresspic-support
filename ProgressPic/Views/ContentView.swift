@@ -5,6 +5,8 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @StateObject private var cameraService = CameraService()
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var cameraStopTask: Task<Void, Never>?
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -51,10 +53,53 @@ struct ContentView: View {
                 PhotoStore.clearCache()
             }
         }
-        .onChange(of: selectedTab) { _, newTab in
-            // Stop camera when switching away from camera tab to save battery
-            if newTab != 1 {
-                cameraService.stopIfNotNeeded()
+        .onChange(of: selectedTab) { oldTab, newTab in
+            // Manage camera lifecycle based on tab selection
+            if newTab == 1 {
+                // Switching TO camera tab
+                // Cancel any pending stop task
+                cameraStopTask?.cancel()
+                cameraStopTask = nil
+
+                // Start camera if not running
+                if cameraService.isAuthorized && !cameraService.session.isRunning {
+                    print("▶️ Switching to camera tab - starting camera")
+                    cameraService.start()
+                }
+            } else if oldTab == 1 {
+                // Switching AWAY FROM camera tab
+                // Schedule camera stop after 5 seconds (balance between UX and battery)
+                // Short delay makes returns feel instant, but stops soon enough to save battery
+                print("⏸️ Switching away from camera tab - scheduling stop in 5 seconds")
+                cameraStopTask?.cancel()
+                cameraStopTask = Task {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+
+                    // Check if task was cancelled (user returned to camera tab)
+                    guard !Task.isCancelled else {
+                        print("✅ Camera stop cancelled - user returned to camera tab")
+                        return
+                    }
+
+                    await MainActor.run {
+                        print("⏸️ Stopping camera after 5-second delay")
+                        cameraService.stop()
+                    }
+                }
+            }
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Always stop camera when app goes to background
+            if newPhase == .background {
+                print("📱 App entering background - stopping camera immediately")
+                cameraStopTask?.cancel()
+                cameraService.stop()
+            } else if newPhase == .active && selectedTab == 1 {
+                // Restart camera if we're on camera tab and app becomes active
+                if cameraService.isAuthorized && !cameraService.session.isRunning {
+                    print("📱 App becoming active on camera tab - starting camera")
+                    cameraService.start()
+                }
             }
         }
     }

@@ -11,9 +11,11 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     @Published var flashMode: AVCaptureDevice.FlashMode = .off
     @Published var currentZoom: CGFloat = 1.0
     @Published var maxZoom: CGFloat = 5.0
+    @Published var hasUltraWideCamera = false
 
-    private let session = AVCaptureSession()
+    let session = AVCaptureSession() // Made internal for access in ContentView
     private let output = AVCapturePhotoOutput()
+    private var currentDevice: AVCaptureDevice?
 
     override init() {
         super.init()
@@ -70,88 +72,9 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         // Use explicit parameter if provided, otherwise use instance variable
         let isFrontCamera = forFrontCamera ?? isFront
 
-        // Get the current interface orientation using modern API
-        let interfaceOrientation: UIInterfaceOrientation
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            interfaceOrientation = windowScene.interfaceOrientation
-        } else {
-            interfaceOrientation = .portrait
-        }
-
-        // Use iOS 17+ rotation angle API when available
-        if #available(iOS 17.0, *) {
-            // Convert interface orientation to rotation angle in degrees
-            // Front and back cameras have different sensor orientations
-            let rotationAngle: CGFloat
-
-            if isFrontCamera {
-                // Front camera sensor orientation
-                switch interfaceOrientation {
-                case .portrait:
-                    rotationAngle = 270  // Front camera needs 270° for correct portrait orientation
-                case .portraitUpsideDown:
-                    rotationAngle = 90
-                case .landscapeLeft:
-                    rotationAngle = 180
-                case .landscapeRight:
-                    rotationAngle = 0
-                case .unknown:
-                    rotationAngle = 270
-                @unknown default:
-                    rotationAngle = 270
-                }
-            } else {
-                // Back camera sensor orientation
-                switch interfaceOrientation {
-                case .portrait:
-                    rotationAngle = 90
-                case .portraitUpsideDown:
-                    rotationAngle = 270
-                case .landscapeLeft:
-                    rotationAngle = 180
-                case .landscapeRight:
-                    rotationAngle = 0
-                case .unknown:
-                    rotationAngle = 90
-                @unknown default:
-                    rotationAngle = 90
-                }
-            }
-
-            if connection.isVideoRotationAngleSupported(rotationAngle) {
-                connection.videoRotationAngle = rotationAngle
-                print("🔄 Video rotation angle set to: \(rotationAngle)° for \(isFrontCamera ? "front" : "back") camera in \(interfaceOrientation)")
-            }
-        } else {
-            // Fallback for iOS 16 and earlier
-            #if compiler(>=5.9)
-            // Suppress deprecation warning for iOS 16 compatibility
-            if connection.isVideoOrientationSupported {
-                let videoOrientation: AVCaptureVideoOrientation
-                switch interfaceOrientation {
-                case .portrait:
-                    videoOrientation = .portrait
-                case .portraitUpsideDown:
-                    videoOrientation = .portraitUpsideDown
-                case .landscapeLeft:
-                    videoOrientation = .landscapeLeft
-                case .landscapeRight:
-                    videoOrientation = .landscapeRight
-                case .unknown:
-                    videoOrientation = .portrait
-                @unknown default:
-                    videoOrientation = .portrait
-                }
-                connection.videoOrientation = videoOrientation
-                print("🔄 Video orientation updated to: \(videoOrientation.rawValue)")
-            }
-            #endif
-        }
-
-        // Mirror preview for front camera (like a mirror)
-        // But capture will not be mirrored (normal photo)
+        // Let AVFoundation handle rotation automatically - just set mirroring
+        // Mirror preview for front camera (like a mirror) but keep capture normal
         if connection.isVideoMirroringSupported {
-            // IMPORTANT: Must disable automatic adjustment before manual control
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = isFrontCamera
             print("🔄 Video mirroring set to: \(isFrontCamera ? "ON (front camera)" : "OFF (back camera)")")
@@ -169,7 +92,20 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             self.session.inputs.forEach { self.session.removeInput($0) }
             print("🗑️ Removed existing inputs")
             
-            // Add camera input
+            // Check for ultra-wide camera availability (only on back)
+            if !front {
+                let ultraWide = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
+                DispatchQueue.main.async {
+                    self.hasUltraWideCamera = ultraWide != nil
+                    print("📷 Ultra-wide camera available: \(ultraWide != nil)")
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.hasUltraWideCamera = false
+                }
+            }
+            
+            // Add camera input - start with wide angle camera
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: front ? .front : .back) else {
                 print("❌ Could not find camera device")
                 self.session.commitConfiguration()
@@ -182,6 +118,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                 let input = try AVCaptureDeviceInput(device: device)
                 if self.session.canAddInput(input) {
                     self.session.addInput(input)
+                    self.currentDevice = device  // Keep track of current device
                     print("✅ Added camera input")
                 } else {
                     print("❌ Cannot add camera input")
@@ -276,10 +213,10 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             }
         }
     }
-    func stop() { 
-        if session.isRunning { 
+    func stop() {
+        if session.isRunning {
             DispatchQueue.global(qos: .userInitiated).async {
-                self.session.stopRunning() 
+                self.session.stopRunning()
             }
         }
         Task { @MainActor in canCapture = false }
@@ -323,6 +260,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             // Update isFront state on main thread after configuration starts
             DispatchQueue.main.async {
                 self.isFront = newValue
+                self.currentDevice = nil  // Reset currentDevice when flipping cameras
             }
 
             // Force preview layer update on main thread
@@ -388,23 +326,171 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         }
     }
     
+    private var isSwitchingCamera = false
+    
     func setZoom(_ level: CGFloat) {
-        guard let device = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first else { return }
+        print("🔍 Setting zoom to: \(level)x")
         
-        do {
-            try device.lockForConfiguration()
-            let deviceMaxZoom = min(device.activeFormat.videoMaxZoomFactor, 5.0)
-            let newZoom = min(max(level, 1.0), deviceMaxZoom)
-            device.videoZoomFactor = newZoom
-            device.unlockForConfiguration()
-            
-            DispatchQueue.main.async {
-                self.currentZoom = newZoom
-                self.maxZoom = deviceMaxZoom
+        // Prevent multiple simultaneous switches
+        guard !isSwitchingCamera else {
+            print("⚠️ Camera switch already in progress")
+            return
+        }
+        
+        // Determine which camera we need
+        if level == 0.5 && hasUltraWideCamera {
+            // Use ultra-wide camera for 0.5x
+            performCameraSwitch(to: .builtInUltraWideCamera, targetZoom: level)
+        } else if level >= 1.0 {
+            // Use wide camera for 1x and 2x
+            performCameraSwitch(to: .builtInWideAngleCamera, targetZoom: level)
+        }
+    }
+    
+    private func performCameraSwitch(to type: AVCaptureDevice.DeviceType, targetZoom: CGFloat) {
+        // Reset the flag after a timeout to prevent getting stuck
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if self.isSwitchingCamera {
+                print("⚠️ Camera switch timeout - resetting flag")
+                self.isSwitchingCamera = false
             }
-            print("🔍 Zoom set to: \(newZoom)x")
-        } catch {
-            print("❌ Zoom error: \(error)")
+        }
+        
+        isSwitchingCamera = true
+        
+        // Get current device from session
+        let currentDevice = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first
+        let currentType = currentDevice?.deviceType
+        
+        print("📷 Current camera: \(currentType?.rawValue ?? "none"), target: \(type.rawValue), zoom: \(targetZoom)x")
+        
+        // If already on the right camera, just adjust zoom
+        if currentType == type {
+            print("📷 Already on \(type.rawValue), adjusting zoom to \(targetZoom)x")
+            
+            guard let device = currentDevice else {
+                print("❌ No current device found")
+                isSwitchingCamera = false
+                return
+            }
+            
+            do {
+                try device.lockForConfiguration()
+                if type == .builtInUltraWideCamera {
+                    device.videoZoomFactor = 1.0
+                } else {
+                    let deviceMaxZoom = min(device.activeFormat.videoMaxZoomFactor, 5.0)
+                    let newZoom = min(max(targetZoom, 1.0), deviceMaxZoom)
+                    device.videoZoomFactor = newZoom
+                }
+                device.unlockForConfiguration()
+                
+                DispatchQueue.main.async {
+                    self.currentZoom = targetZoom
+                    self.isSwitchingCamera = false
+                    print("✅ Zoom updated to \(targetZoom)x on \(type.rawValue)")
+                }
+            } catch {
+                print("❌ Error adjusting zoom: \(error)")
+                isSwitchingCamera = false
+            }
+            return
+        }
+        
+        // Need to switch cameras
+        print("🔄 Switching from \(currentType?.rawValue ?? "none") to \(type.rawValue)")
+        
+        guard let newDevice = AVCaptureDevice.default(type, for: .video, position: .back) else {
+            print("❌ Camera type \(type.rawValue) not available")
+            isSwitchingCamera = false
+            return
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Begin configuration first
+            self.session.beginConfiguration()
+            
+            // Remove ALL current inputs
+            let inputs = self.session.inputs
+            print("🗑️ Removing \(inputs.count) input(s)")
+            for input in inputs {
+                self.session.removeInput(input)
+            }
+            
+            // Make sure output is still connected
+            if !self.session.outputs.contains(self.output) {
+                print("⚠️ Photo output not in session, re-adding it")
+                if self.session.canAddOutput(self.output) {
+                    self.session.addOutput(self.output)
+                }
+            }
+            
+            do {
+                let input = try AVCaptureDeviceInput(device: newDevice)
+                if self.session.canAddInput(input) {
+                    self.session.addInput(input)
+                    self.currentDevice = newDevice
+                    
+                    // Set appropriate zoom
+                    try newDevice.lockForConfiguration()
+                    if type == .builtInUltraWideCamera {
+                        newDevice.videoZoomFactor = 1.0
+                        print("📷 Ultra-wide zoom set to 1.0 (represents 0.5x)")
+                    } else {
+                        let deviceMaxZoom = min(newDevice.activeFormat.videoMaxZoomFactor, 5.0)
+                        let newZoom = min(max(targetZoom, 1.0), deviceMaxZoom)
+                        newDevice.videoZoomFactor = newZoom
+                        print("📷 Wide camera zoom set to \(newZoom)x")
+                    }
+                    newDevice.unlockForConfiguration()
+                    
+                    print("✅ Successfully added \(type.rawValue) to session")
+                    print("📹 Session now has \(self.session.inputs.count) input(s) and \(self.session.outputs.count) output(s)")
+                    
+                    // Commit configuration
+                    self.session.commitConfiguration()
+                    print("✅ Session configuration committed")
+                    
+                    // Ensure session is running
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                        print("▶️ Started session after camera switch")
+                    }
+                    
+                    // Update UI on main thread
+                    DispatchQueue.main.async {
+                        self.currentZoom = targetZoom
+                        self.updateCaptureReadiness()
+                        
+                        // Force preview layer update
+                        if let layer = self.previewLayer {
+                            CATransaction.begin()
+                            CATransaction.setDisableActions(true)
+                            layer.session = self.session
+                            CATransaction.commit()
+                            print("📱 Preview layer updated")
+                        }
+                        
+                        // Reset switching flag
+                        self.isSwitchingCamera = false
+                        print("✅ Camera switch completed to \(type.rawValue) at \(targetZoom)x")
+                    }
+                } else {
+                    print("❌ Cannot add camera input to session")
+                    self.session.commitConfiguration()
+                    
+                    DispatchQueue.main.async {
+                        self.isSwitchingCamera = false
+                    }
+                }
+            } catch {
+                print("❌ Error switching camera: \(error)")
+                self.session.commitConfiguration()
+                
+                DispatchQueue.main.async {
+                    self.isSwitchingCamera = false
+                }
+            }
         }
     }
 
@@ -413,9 +499,9 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             print("🚫 Not ready to capture")
             return
         }
-        
+
         let settings = AVCapturePhotoSettings()
-        
+
         // Configure flash if supported by the device
         if output.supportedFlashModes.contains(flashMode) {
             settings.flashMode = flashMode
@@ -423,7 +509,8 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         } else {
             print("⚠️ Flash mode \(flashMode.rawValue) not supported on this device")
         }
-        
+
+        // Let AVFoundation handle orientation automatically via EXIF metadata
         output.capturePhoto(with: settings, delegate: self)
     }
 }

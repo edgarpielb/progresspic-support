@@ -191,7 +191,7 @@ struct NewJourneySheet: View {
                         }
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.pink)
                     }
                 }
             }
@@ -403,7 +403,7 @@ struct NewJourneyEditReminderView: View {
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.pink)
                     }
                     .disabled(notificationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedDays.isEmpty)
                 }

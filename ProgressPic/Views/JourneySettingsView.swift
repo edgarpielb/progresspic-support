@@ -64,7 +64,7 @@ struct JourneySettingsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { saveSettings() }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.pink)
                     }
                 }
             }

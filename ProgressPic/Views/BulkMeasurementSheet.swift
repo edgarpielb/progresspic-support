@@ -85,7 +85,7 @@ struct BulkMeasurementSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: saveAllMeasurements) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(hasAnyValue ? .blue : .gray)
+                            .foregroundColor(hasAnyValue ? .pink : .gray)
                     }
                     .disabled(!hasAnyValue)
                 }

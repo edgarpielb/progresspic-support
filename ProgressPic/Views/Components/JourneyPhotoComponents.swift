@@ -3,6 +3,213 @@ import SwiftData
 
 // MARK: - Journey Cover Thumbnail Components
 
+// MARK: - Journey Photo Collage
+struct JourneyPhotoCollage: View {
+    let journey: Journey
+    @Query private var photos: [ProgressPhoto]
+    @State private var loadedImages: [UUID: UIImage] = [:]
+
+    init(journey: Journey) {
+        self.journey = journey
+        let journeyId = journey.id
+        _photos = Query(
+            filter: #Predicate<ProgressPhoto> { $0.journeyId == journeyId },
+            sort: \ProgressPhoto.date,
+            order: .reverse
+        )
+    }
+
+    var body: some View {
+        let photoCount = photos.count
+
+        if photoCount == 0 {
+            // Empty state - show camera icon
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    Image(systemName: "camera")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.3))
+                )
+                .frame(height: 200)
+        } else if photoCount == 1 {
+            // Single photo - full width
+            singlePhotoView(photos[0])
+        } else if photoCount == 2 {
+            // Two photos - side by side
+            HStack(spacing: 2) {
+                photoTile(photos[0])
+                photoTile(photos[1])
+            }
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        } else if photoCount <= 3 {
+            // Three photos - one large left, two stacked right
+            HStack(spacing: 2) {
+                photoTile(photos[0])
+                    .frame(maxWidth: .infinity)
+
+                VStack(spacing: 2) {
+                    photoTile(photos[1])
+                    photoTile(photos[2])
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        } else {
+            // Four or more photos - 2x3 grid (like image 2)
+            VStack(spacing: 2) {
+                HStack(spacing: 2) {
+                    photoTile(photos[0])
+                    photoTile(photos[1])
+                    photoTile(photos[2])
+                }
+                HStack(spacing: 2) {
+                    photoTile(photos[min(3, photoCount - 1)])
+                    photoTile(photos[min(4, photoCount - 1)])
+                    if photoCount > 5 {
+                        // Show count overlay on last tile
+                        ZStack {
+                            photoTile(photos[5])
+                            if photoCount > 6 {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.6))
+                                VStack {
+                                    Spacer()
+                                    Text("+\(photoCount - 6)")
+                                        .font(.title.bold())
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    Spacer()
+                                    Spacer()
+                                }
+                            }
+                        }
+                    } else {
+                        photoTile(photos[min(5, photoCount - 1)])
+                    }
+                }
+            }
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+    }
+
+    @ViewBuilder
+    private func singlePhotoView(_ photo: ProgressPhoto) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.white.opacity(0.06))
+
+            if let image = loadedImages[photo.id] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ProgressView()
+                    .tint(.white.opacity(0.5))
+            }
+        }
+        .frame(height: 200)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .task {
+            if loadedImages[photo.id] == nil {
+                // Load original if available
+                let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+                if let img = await PhotoStore.fetchUIImage(
+                    localId: imageId,
+                    targetSize: CGSize(width: 400, height: 500)
+                ) {
+                    // Apply transform if needed
+                    if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
+                       photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
+                        loadedImages[photo.id] = renderTransformedImage(image: img, transform: photo.alignTransform, targetSize: CGSize(width: 400, height: 500))
+                    } else {
+                        loadedImages[photo.id] = img
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func photoTile(_ photo: ProgressPhoto) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+
+            if let image = loadedImages[photo.id] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ProgressView()
+                    .tint(.white.opacity(0.5))
+                    .scaleEffect(0.6)
+            }
+        }
+        .clipped()
+        .task {
+            if loadedImages[photo.id] == nil {
+                // Load original if available
+                let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+                if let img = await PhotoStore.fetchUIImage(
+                    localId: imageId,
+                    targetSize: CGSize(width: 200, height: 250)
+                ) {
+                    // Apply transform if needed
+                    if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
+                       photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
+                        loadedImages[photo.id] = renderTransformedImage(image: img, transform: photo.alignTransform, targetSize: CGSize(width: 200, height: 250))
+                    } else {
+                        loadedImages[photo.id] = img
+                    }
+                }
+            }
+        }
+    }
+    
+    private func renderTransformedImage(image: UIImage, transform: AlignTransform, targetSize: CGSize) -> UIImage {
+        // Apply transform to create the display image
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+            
+            // Move to center
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+            
+            // Apply transform
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
+            
+            // Calculate fit
+            let imageAspect = image.size.width / image.size.height
+            let targetAspect = targetSize.width / targetSize.height
+            
+            var drawSize: CGSize
+            if imageAspect > targetAspect {
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+            
+            // Draw centered
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            
+            image.draw(in: drawRect)
+        }
+    }
+}
+
 struct JourneyCoverThumb: View {
     let journey: Journey
     @State private var img: UIImage?
@@ -33,14 +240,14 @@ struct JourneyCoverThumb: View {
         .task {
             // Load the most recent photo with smaller size for cover thumbnails
             if let latestPhoto = photos.first {
-                img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 120, height: 120))
+                await loadCoverImage(latestPhoto)
             }
         }
         .onChange(of: photos.count) { _, _ in
             // Reload when photos change
             Task {
                 if let latestPhoto = photos.first {
-                    img = await PhotoStore.fetchUIImage(localId: latestPhoto.assetLocalId, targetSize: CGSize(width: 120, height: 120))
+                    await loadCoverImage(latestPhoto)
                 } else {
                     img = nil
                 }
@@ -49,6 +256,52 @@ struct JourneyCoverThumb: View {
         .onDisappear {
             // Clear image when view disappears to free memory
             img = nil
+        }
+    }
+    
+    private func loadCoverImage(_ photo: ProgressPhoto) async {
+        // Load original if available
+        let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+        if let loadedImg = await PhotoStore.fetchUIImage(localId: imageId, targetSize: CGSize(width: 120, height: 120)) {
+            // Apply transform if needed
+            if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
+               photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
+                img = renderTransformedCover(image: loadedImg, transform: photo.alignTransform)
+            } else {
+                img = loadedImg
+            }
+        }
+    }
+    
+    private func renderTransformedCover(image: UIImage, transform: AlignTransform) -> UIImage {
+        let targetSize = CGSize(width: 120, height: 120)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+            
+            // Move to center
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+            
+            // Apply transform
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
+            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
+            
+            // Calculate fit - for square thumbnail, center crop
+            let scale = max(targetSize.width / image.size.width, targetSize.height / image.size.height)
+            let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            
+            // Draw centered
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            
+            image.draw(in: drawRect)
         }
     }
 }
@@ -86,39 +339,32 @@ struct CoverThumb: View {
 struct PhotoGridItem: View {
     let photo: ProgressPhoto
     @State private var image: UIImage?
-    @State private var isLoading = true
+    @State private var isLoading = false
     @State private var loadFailed = false
     @State private var loadTask: Task<Void, Never>?
     
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.06))
-                
+            ZStack(alignment: .center) {
                 if let img = image {
                     // Apply transform to show cropped version
                     let transform = photo.alignTransform
                     let itemHeight = geometry.size.width * 5.0/4.0 // 4:5 ratio height
-                    if transform.scale != 1 || transform.offsetX != 0 || transform.offsetY != 0 || transform.rotation != 0 {
-                        // Show transformed (cropped) version - render it properly for thumbnail
-                        let transformedImage = renderTransformedThumbnail(image: img, transform: transform, size: geometry.size.width)
-                        Image(uiImage: transformedImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geometry.size.width, height: itemHeight)
-                            .clipped()
-                            .transition(.opacity.animation(.easeIn(duration: 0.2)))
-                    } else {
-                        // Show original (no transform applied)
-                        Image(uiImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geometry.size.width, height: itemHeight)
-                            .clipped()
-                            .transition(.opacity.animation(.easeIn(duration: 0.2)))
-                    }
-                } else if loadFailed {
+                    
+                    // Always render with transform for consistency
+                    let displayImage = renderTransformedThumbnail(image: img, transform: transform, size: geometry.size.width)
+                    Image(uiImage: displayImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: itemHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    // Only show background when no image is loaded
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.06))
+                }
+                
+                if loadFailed && image == nil {
                     Button(action: {
                         Task { await loadImage() }
                     }) {
@@ -132,7 +378,7 @@ struct PhotoGridItem: View {
                         }
                     }
                     .buttonStyle(.plain)
-                } else if isLoading {
+                } else if isLoading && image == nil {
                     VStack(spacing: 8) {
                         ProgressView()
                             .tint(.white)
@@ -151,20 +397,28 @@ struct PhotoGridItem: View {
             // Reload when assetLocalId changes (e.g., after recropping)
             await loadImage()
         }
+        .onChange(of: photo.alignTransform) { _, _ in
+            // Clear cached image and reload when transform changes
+            image = nil
+            Task {
+                await loadImage()
+            }
+        }
         .onDisappear {
             // Cancel load task if view disappears before loading completes
             loadTask?.cancel()
-            // Clear image when view disappears to free memory
-            image = nil
+            // Don't clear image - let PhotoStore cache handle memory management
+            // Clearing here causes unnecessary reloading when navigating between photos
         }
     }
     
     private func loadImage() async {
+        // Note: We allow reloading when image is nil to handle transform changes
+
         // Cancel any previous load task
         loadTask?.cancel()
 
         loadTask = Task {
-            isLoading = true
             loadFailed = false
 
             // Use higher quality thumbnails for better grid display
@@ -173,7 +427,20 @@ struct PhotoGridItem: View {
 
             guard !Task.isCancelled else { return }
 
-            if let loadedImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize) {
+            // Only show loading if this takes longer than 50ms (cache misses)
+            let loadingTask = Task {
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        isLoading = true
+                    }
+                }
+            }
+
+            // Load original if available, otherwise use the stored image
+            let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+            if let loadedImage = await PhotoStore.fetchUIImage(localId: imageId, targetSize: targetSize) {
+                loadingTask.cancel()
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.image = loadedImage
@@ -181,6 +448,7 @@ struct PhotoGridItem: View {
                 }
             } else {
                 // If load failed, mark as failed for retry
+                loadingTask.cancel()
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.loadFailed = true

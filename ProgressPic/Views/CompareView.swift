@@ -132,8 +132,14 @@ struct CompareView: View {
                         
                         // Compare view
                         if let l = left, let r = right, !showLeftSelector && !showRightSelector {
-                            CompareCanvas(left: l, right: r, mode: mode)
-                                .padding(.horizontal)
+                            CompareCanvas(
+                                left: l, 
+                                right: r, 
+                                mode: mode,
+                                onLeftTap: mode == .slider ? { showLeftSelector = true } : nil,
+                                onRightTap: mode == .slider ? { showRightSelector = true } : nil
+                            )
+                            .padding(.horizontal)
                         }
                     }
                 } else {
@@ -269,7 +275,7 @@ struct PhotoSelectorSlider: View {
                                                     Spacer()
                                                     Image(systemName: "checkmark.circle.fill")
                                                         .font(.title3)
-                                                        .foregroundColor(.cyan)
+                                                        .foregroundColor(.pink)
                                                         .background(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8), in: Circle())
                                                         .padding(4)
                                                 }
@@ -383,6 +389,8 @@ struct CompareCanvas: View {
     let left: ProgressPhoto
     let right: ProgressPhoto
     let mode: CompareView.Mode
+    var onLeftTap: (() -> Void)?
+    var onRightTap: (() -> Void)?
 
     @State private var leftImg: UIImage?
     @State private var rightImg: UIImage?
@@ -399,18 +407,39 @@ struct CompareCanvas: View {
                             .scaledToFill()
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(alignment: .topLeading) {
+                                // Date label for left image
+                                Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.black.opacity(0.6), in: Capsule())
+                                    .padding(12)
+                            }
                         
                         Image(uiImage: r)
                             .resizable()
                             .scaledToFill()
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(alignment: .topTrailing) {
+                                // Date label for right image
+                                Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.black.opacity(0.6), in: Capsule())
+                                    .padding(12)
+                            }
                     }
-                    .frame(height: 320) // Reduced height for parallel mode
+                    .frame(height: 420) // Same height as slider mode
                 case .slider:
                     GeometryReader { geo in
                         let w = max(1, geo.size.width)
                         let cut = w * sliderX
+                        let sliderZoneWidth: CGFloat = 60 // Width of the draggable slider zone
 
                         ZStack(alignment: .leading) {
                             // Left image (base layer - always visible)
@@ -431,8 +460,9 @@ struct CompareCanvas: View {
                                         .frame(width: w - cut)
                                         .offset(x: cut)
                                 }
-
-                            // Slider handle with line
+                        }
+                        .overlay(alignment: .leading) {
+                            // Slider handle with line (visual only, no interaction)
                             ZStack {
                                 // Vertical line
                                 Rectangle()
@@ -453,18 +483,113 @@ struct CompareCanvas: View {
                                     .position(x: 0, y: geo.size.height / 2)
                             }
                             .frame(width: 3)
-                            .offset(x: cut - 1.5) // Center the line on the cut position
-                            .allowsHitTesting(false) // Let touches pass through to the gesture
+                            .offset(x: cut - 1.5)
+                            .allowsHitTesting(false)
+                        }
+                        .overlay(alignment: .topLeading) {
+                            // Date labels overlay
+                            HStack {
+                                // Left date label
+                                if cut > 80 {
+                                    Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.caption)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.black.opacity(0.6), in: Capsule())
+                                }
+                                
+                                Spacer()
+                                
+                                // Right date label
+                                if (w - cut) > 80 {
+                                    Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.caption)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.black.opacity(0.6), in: Capsule())
+                                }
+                            }
+                            .frame(width: w)
+                            .padding(12)
+                            .allowsHitTesting(false)
+                        }
+                        .overlay(alignment: .bottomLeading) {
+                            // Labels overlay
+                            HStack {
+                                // Left label
+                                if cut > 100 {
+                                    Text("Tap to change")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.black.opacity(0.6), in: Capsule())
+                                        .frame(maxWidth: cut - 50, alignment: .center)
+                                }
+                                
+                                Spacer()
+                                
+                                // Right label
+                                if (w - cut) > 100 {
+                                    Text("Tap to change")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.black.opacity(0.6), in: Capsule())
+                                        .frame(maxWidth: w - cut - 50, alignment: .center)
+                                }
+                            }
+                            .frame(width: w)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+                            .allowsHitTesting(false)
+                        }
+                        .overlay {
+                            // Interaction overlay - Left tap area
+                            if cut > sliderZoneWidth {
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: cut - sliderZoneWidth / 2, height: geo.size.height)
+                                    .contentShape(Rectangle())
+                                    .position(x: (cut - sliderZoneWidth / 2) / 2, y: geo.size.height / 2)
+                                    .onTapGesture {
+                                        onLeftTap?()
+                                    }
+                            }
+                        }
+                        .overlay {
+                            // Interaction overlay - Right tap area
+                            if (w - cut) > sliderZoneWidth {
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(width: w - cut - sliderZoneWidth / 2, height: geo.size.height)
+                                    .contentShape(Rectangle())
+                                    .position(x: cut + sliderZoneWidth / 2 + (w - cut - sliderZoneWidth / 2) / 2, y: geo.size.height / 2)
+                                    .onTapGesture {
+                                        onRightTap?()
+                                    }
+                            }
+                        }
+                        .overlay {
+                            // Slider drag area - only center zone
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(width: sliderZoneWidth, height: geo.size.height)
+                                .contentShape(Rectangle())
+                                .position(x: cut, y: geo.size.height / 2)
+                                .gesture(
+                                    DragGesture()
+                                        .onChanged { value in
+                                            let newX = cut + value.translation.width
+                                            let clampedX = min(max(newX, 0), w)
+                                            sliderX = clampedX / w
+                                        }
+                                )
                         }
                         .frame(width: w, height: geo.size.height)
-                        .contentShape(Rectangle()) // Make entire area tappable
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { v in
-                                    let x = min(max(v.location.x, 0), w)
-                                    sliderX = x / w
-                                }
-                        )
                     }
                     .frame(height: 420)
                     .clipShape(RoundedRectangle(cornerRadius: 16))

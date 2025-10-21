@@ -289,5 +289,38 @@ enum PhotoStore {
         // Fallback to photo library for existing photos
         return PHAsset.fetchAssets(withLocalIdentifiers: [localId], options: nil).firstObject?.creationDate
     }
+
+    /// Extract the original EXIF creation date from a PHAsset
+    /// This returns the actual date the photo was taken, not the import date
+    static func getEXIFCreationDate(from asset: PHAsset) async -> Date? {
+        return await withCheckedContinuation { continuation in
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = true
+
+            asset.requestContentEditingInput(with: options) { input, _ in
+                guard let url = input?.fullSizeImageURL,
+                      let ciImage = CIImage(contentsOf: url),
+                      let exifData = ciImage.properties["{Exif}"] as? [String: Any],
+                      let dateString = exifData["DateTimeOriginal"] as? String else {
+                    // Fallback to PHAsset creationDate if EXIF not available
+                    continuation.resume(returning: asset.creationDate)
+                    return
+                }
+
+                // Parse EXIF date format: "yyyy:MM:dd HH:mm:ss"
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone.current
+
+                if let date = formatter.date(from: dateString) {
+                    continuation.resume(returning: date)
+                } else {
+                    // Fallback if parsing fails
+                    continuation.resume(returning: asset.creationDate)
+                }
+            }
+        }
+    }
 }
 

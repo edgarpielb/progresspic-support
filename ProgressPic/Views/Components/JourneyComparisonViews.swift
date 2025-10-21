@@ -9,11 +9,27 @@ struct JourneyCompareSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
-            Color(red: 30/255, green: 32/255, blue: 35/255)
-                .ignoresSafeArea()
+        NavigationView {
+            ZStack {
+                Color(red: 30/255, green: 32/255, blue: 35/255)
+                    .ignoresSafeArea()
 
-            JourneyCompareView(journey: journey, photos: photos, dismiss: dismiss)
+                JourneyCompareView(journey: journey, photos: photos)
+            }
+            .navigationTitle("Compare Photos")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.pink)
+                    }
+                }
+            }
         }
     }
 }
@@ -22,7 +38,6 @@ struct JourneyCompareSheet: View {
 struct JourneyCompareView: View {
     let journey: Journey
     let photos: [ProgressPhoto]
-    let dismiss: DismissAction
     @State private var left: ProgressPhoto?
     @State private var right: ProgressPhoto?
     @State private var mode: CompareMode = .parallel
@@ -83,29 +98,7 @@ struct JourneyCompareView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                // Custom header with title and done button - inside ScrollView
-                HStack {
-                    Spacer()
-                    Text("Compare Photos")
-                        .font(.title3.bold())
-                        .foregroundColor(.white)
-                    Spacer()
-                }
-                .overlay(
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            dismiss()
-                        }) {
-                            Image(systemName: "checkmark")
-                                .foregroundColor(.white)
-                                .font(.body)
-                        }
-                    }
-                    .padding(.horizontal)
-                )
-                .padding(.top, 20)
-                .padding(.bottom, 16)
+                Spacer().frame(height: 8)
 
                 if visiblePhotos.count >= 2 {
                         // Use standard Picker for better responsiveness
@@ -128,7 +121,7 @@ struct JourneyCompareView: View {
                             VStack(spacing: 4) {
                                 Image(systemName: showDates ? "calendar.badge.checkmark" : "calendar")
                                     .font(.system(size: AppStyle.IconSize.xl))
-                                    .foregroundColor(showDates ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                                    .foregroundColor(showDates ? .pink : AppStyle.Colors.textPrimary)
                                 Text("Dates")
                                     .font(AppStyle.FontStyle.caption)
                                     .foregroundColor(AppStyle.Colors.textSecondary)
@@ -143,7 +136,7 @@ struct JourneyCompareView: View {
                             VStack(spacing: 4) {
                                 Image(systemName: fitImage ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
                                     .font(.system(size: AppStyle.IconSize.xl))
-                                    .foregroundColor(fitImage ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                                    .foregroundColor(fitImage ? .pink : AppStyle.Colors.textPrimary)
                                 Text("Fit Image")
                                     .font(AppStyle.FontStyle.caption)
                                     .foregroundColor(AppStyle.Colors.textSecondary)
@@ -203,33 +196,34 @@ struct JourneyCompareView: View {
                                     }
                                 .overlay(
                                     VStack {
-                                        if selectedSide == .left && showTooltip {
-                                            ZStack {
-                                                Circle()
-                                                    .fill(.white)
-                                                    .frame(width: 40, height: 40)
-                                                    .shadow(radius: 4)
-                                                
-                                                Text("L")
-                                                    .font(.system(size: 20, weight: .bold))
-                                                    .foregroundColor(.black)
-                                            }
-                                            .padding(.top, 20)
-                                            
-                                            Text("Tap an image\nbelow to replace")
-                                                .font(AppStyle.FontStyle.caption)
-                                                .multilineTextAlignment(.center)
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 8)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                )
-                                                .padding(.top, 8)
-                                                .transition(.opacity)
-                                        }
                                         Spacer()
+                                        if selectedSide == .left && showTooltip {
+                                            VStack(spacing: 4) {
+                                                ZStack {
+                                                    Circle()
+                                                        .fill(.pink)
+                                                        .frame(width: 40, height: 40)
+                                                        .shadow(radius: 4)
+
+                                                    Text("L")
+                                                        .font(.system(size: 20, weight: .bold))
+                                                        .foregroundColor(.white)
+                                                }
+
+                                                Text("Tap an image\nbelow to replace")
+                                                    .font(AppStyle.FontStyle.caption)
+                                                    .multilineTextAlignment(.center)
+                                                    .foregroundColor(.white)
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 8)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                    )
+                                                    .transition(.opacity)
+                                            }
+                                            .padding(.bottom, showDates ? 32 : 12)
+                                        }
                                     }
                                 )
                             
@@ -241,33 +235,34 @@ struct JourneyCompareView: View {
                                 }
                                 .overlay(
                                     VStack {
-                                        if selectedSide == .right && showTooltip {
-                                            ZStack {
-                                                Circle()
-                                                    .fill(.white)
-                                                    .frame(width: 40, height: 40)
-                                                    .shadow(radius: 4)
-                                                
-                                                Text("R")
-                                                    .font(.system(size: 20, weight: .bold))
-                                                    .foregroundColor(.black)
-                                            }
-                                            .padding(.top, 20)
-                                            
-                                            Text("Tap an image\nbelow to replace")
-                                                .font(AppStyle.FontStyle.caption)
-                                                .multilineTextAlignment(.center)
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 8)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                )
-                                                .padding(.top, 8)
-                                                .transition(.opacity)
-                                        }
                                         Spacer()
+                                        if selectedSide == .right && showTooltip {
+                                            VStack(spacing: 4) {
+                                                ZStack {
+                                                    Circle()
+                                                        .fill(.pink)
+                                                        .frame(width: 40, height: 40)
+                                                        .shadow(radius: 4)
+
+                                                    Text("R")
+                                                        .font(.system(size: 20, weight: .bold))
+                                                        .foregroundColor(.white)
+                                                }
+
+                                                Text("Tap an image\nbelow to replace")
+                                                    .font(AppStyle.FontStyle.caption)
+                                                    .multilineTextAlignment(.center)
+                                                    .foregroundColor(.white)
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 8)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                    )
+                                                    .transition(.opacity)
+                                            }
+                                            .padding(.bottom, showDates ? 32 : 12)
+                                        }
                                     }
                                 )
                             }
