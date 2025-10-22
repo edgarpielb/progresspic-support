@@ -45,6 +45,7 @@ struct JourneyCompareView: View {
     @State private var fitImage = false
     @State private var selectedSide: SelectionSide = .left
     @State private var showTooltip = false
+    @State private var sliderPosition: CGFloat = 0.5
     
     enum CompareMode: String, CaseIterable {
         case parallel = "Parallel"
@@ -83,7 +84,14 @@ struct JourneyCompareView: View {
         withAnimation(.easeIn(duration: 0.2)) {
             showTooltip = true
         }
-        
+
+        // Reset slider to center when selecting a side in slider mode
+        if mode == .slider {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                sliderPosition = 0.5
+            }
+        }
+
         // Auto-hide tooltip after 3 seconds
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
@@ -173,7 +181,8 @@ struct JourneyCompareView: View {
                                 right: right,
                                 mode: mode,
                                 showDates: showDates,
-                                fitImage: fitImage
+                                fitImage: fitImage,
+                                sliderPosition: $sliderPosition
                             )
                             .frame(width: availableWidth, height: canvasHeight)
                             .background(
@@ -185,8 +194,10 @@ struct JourneyCompareView: View {
                                     .stroke(AppStyle.Colors.border, lineWidth: 1)
                             )
                         
-                        // Tap areas to select which side to replace (only in parallel mode)
+                        // Tap areas to select which side to replace
+                        // In slider mode, tap areas avoid the slider zone
                         if mode == .parallel {
+                            // Parallel mode: full tap areas for each half
                             HStack(spacing: 0) {
                                 // Left tap area
                                 Color.clear
@@ -226,9 +237,9 @@ struct JourneyCompareView: View {
                                         }
                                     }
                                 )
-                            
-                            // Right tap area
-                            Color.clear
+
+                                // Right tap area
+                                Color.clear
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     selectSide(.right)
@@ -266,14 +277,128 @@ struct JourneyCompareView: View {
                                     }
                                 )
                             }
-                        }
+                        } else {
+                            // Slider mode: tap areas that avoid the 60pt slider zone
+                            GeometryReader { tapGeo in
+                                let sliderX = tapGeo.size.width * sliderPosition
+                                let sliderZone: CGFloat = 60
+
+                                HStack(spacing: 0) {
+                                    // Left tap area (only if far enough from slider)
+                                    if sliderX > sliderZone / 2 {
+                                        Color.clear
+                                            .frame(width: sliderX - sliderZone / 2)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                selectSide(.left)
+                                            }
+                                            .overlay(
+                                                VStack {
+                                                    Spacer()
+                                                    if selectedSide == .left && showTooltip {
+                                                        VStack(spacing: 4) {
+                                                            ZStack {
+                                                                Circle()
+                                                                    .fill(.pink)
+                                                                    .frame(width: 40, height: 40)
+                                                                    .shadow(radius: 4)
+
+                                                                Text("L")
+                                                                    .font(.system(size: 20, weight: .bold))
+                                                                    .foregroundColor(.white)
+                                                            }
+
+                                                            Text("Tap an image\nbelow to replace")
+                                                                .font(AppStyle.FontStyle.caption)
+                                                                .multilineTextAlignment(.center)
+                                                                .foregroundColor(.white)
+                                                                .padding(.horizontal, 12)
+                                                                .padding(.vertical, 8)
+                                                                .background(
+                                                                    RoundedRectangle(cornerRadius: 8)
+                                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                                )
+                                                                .transition(.opacity)
+                                                        }
+                                                        .padding(.bottom, showDates ? 32 : 12)
+                                                    }
+                                                }
+                                            )
+                                    }
+
+                                    // Slider zone - no interaction
+                                    Color.clear
+                                        .frame(width: sliderZone)
+
+                                    // Right tap area (only if far enough from slider)
+                                    if (tapGeo.size.width - sliderX) > sliderZone / 2 {
+                                        Color.clear
+                                            .frame(width: tapGeo.size.width - sliderX - sliderZone / 2)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                selectSide(.right)
+                                            }
+                                            .overlay(
+                                                VStack {
+                                                    Spacer()
+                                                    if selectedSide == .right && showTooltip {
+                                                        VStack(spacing: 4) {
+                                                            ZStack {
+                                                                Circle()
+                                                                    .fill(.pink)
+                                                                    .frame(width: 40, height: 40)
+                                                                    .shadow(radius: 4)
+
+                                                                Text("R")
+                                                                    .font(.system(size: 20, weight: .bold))
+                                                                    .foregroundColor(.white)
+                                                            }
+
+                                                            Text("Tap an image\nbelow to replace")
+                                                                .font(AppStyle.FontStyle.caption)
+                                                                .multilineTextAlignment(.center)
+                                                                .foregroundColor(.white)
+                                                                .padding(.horizontal, 12)
+                                                                .padding(.vertical, 8)
+                                                                .background(
+                                                                    RoundedRectangle(cornerRadius: 8)
+                                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                                                                )
+                                                                .transition(.opacity)
+                                                        }
+                                                        .padding(.bottom, showDates ? 32 : 12)
+                                                    }
+                                                }
+                                            )
+                                    }
+                                }
+                            }
                         }
                     }
                     .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0) // Reserve space for GeometryReader with 4:5 ratio
-                    
+                    }
+                } else {
+                    // Empty state
+                    GeometryReader { geometry in
+                        let availableWidth = geometry.size.width
+                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
+                        
+                        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                            .fill(AppStyle.Colors.panel)
+                            .frame(width: availableWidth, height: canvasHeight)
+                            .overlay(
+                                Text("Select two photos to compare")
+                                    .font(AppStyle.FontStyle.body)
+                                    .foregroundColor(AppStyle.Colors.textSecondary)
+                            )
+                    }
+                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
+                }
+
+                // Single photo slider - always show if we have visible photos
+                if !visiblePhotos.isEmpty {
                     Spacer().frame(height: AppStyle.Spacing.lg)
-                    
-                    // Single photo slider
+
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(visiblePhotos) { photo in
@@ -283,7 +408,7 @@ struct JourneyCompareView: View {
                                     ZStack(alignment: .topLeading) {
                                         PhotoGridItem(photo: photo)
                                             .frame(width: 120, height: 150)
-                                        
+
                                         // Selection indicators
                                         VStack(spacing: 4) {
                                             if self.left?.id == photo.id {
@@ -316,23 +441,6 @@ struct JourneyCompareView: View {
                         .padding(.horizontal)
                     }
                     .padding(.bottom, AppStyle.Spacing.lg)
-                    
-                } else {
-                    // Empty state
-                    GeometryReader { geometry in
-                        let availableWidth = geometry.size.width
-                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
-                        
-                        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                            .fill(AppStyle.Colors.panel)
-                            .frame(width: availableWidth, height: canvasHeight)
-                            .overlay(
-                                Text("Select two photos to compare")
-                                    .font(AppStyle.FontStyle.body)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                            )
-                    }
-                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
                 }
                 } else {
                     // No photos state
@@ -373,11 +481,12 @@ struct ImprovedCompareCanvas: View {
     let mode: JourneyCompareView.CompareMode
     let showDates: Bool
     let fitImage: Bool
-    
+    @Binding var sliderPosition: CGFloat
+
     @State private var leftImg: UIImage?
     @State private var rightImg: UIImage?
-    @State private var sliderPosition: CGFloat = 0.5
-    
+    @State private var dragStartPosition: CGFloat = 0.5
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -404,105 +513,134 @@ struct ImprovedCompareCanvas: View {
         .onChange(of: right) { _, _ in
             Task { await loadImages() }
         }
+        .onChange(of: sliderPosition) { _, newValue in
+            // Sync dragStartPosition when sliderPosition changes externally
+            dragStartPosition = newValue
+        }
     }
     
     private func parallelView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
-        // Calculate dimensions accounting for all padding and spacing
-        let totalHorizontalPadding: CGFloat = 16 // 8 on each side
-        let centerSpacing: CGFloat = 8
-        let imageWidth = (width - totalHorizontalPadding - centerSpacing) / 2
+        GeometryReader { geo in
+            let halfWidth = geo.size.width / 2
 
-        // Calculate height accounting for padding and date label
-        let totalVerticalPadding: CGFloat = 16 // 8 on top and bottom
-        let dateHeight: CGFloat = showDates ? 24 : 0 // Height for date text + spacing
-        let imageHeight = height - totalVerticalPadding - dateHeight
-
-        return HStack(spacing: centerSpacing) {
-            // Left image with date
-            VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                // Left half - image centered in its own space
                 Image(uiImage: leftImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: imageWidth, height: imageHeight)
+                    .frame(width: halfWidth, height: geo.size.height)
                     .clipped()
-                    .cornerRadius(AppStyle.Corner.md)
 
-                if showDates {
-                    Text(left.date.formatted(date: .abbreviated, time: .omitted))
-                        .font(AppStyle.FontStyle.caption)
-                        .foregroundColor(AppStyle.Colors.textSecondary)
-                        .frame(height: 20)
-                }
-            }
-
-            // Right image with date
-            VStack(spacing: 4) {
+                // Right half - image centered in its own space
                 Image(uiImage: rightImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: imageWidth, height: imageHeight)
+                    .frame(width: halfWidth, height: geo.size.height)
                     .clipped()
-                    .cornerRadius(AppStyle.Corner.md)
-
+            }
+            .overlay(alignment: .center) {
+                // White divider line in the center
+                Rectangle()
+                    .fill(.white)
+                    .frame(width: 3, height: geo.size.height)
+            }
+            .overlay(alignment: .topLeading) {
+                // Date labels overlay at top corners
                 if showDates {
-                    Text(right.date.formatted(date: .abbreviated, time: .omitted))
-                        .font(AppStyle.FontStyle.caption)
-                        .foregroundColor(AppStyle.Colors.textSecondary)
-                        .frame(height: 20)
+                    HStack {
+                        Text(left.date.formatted(date: .abbreviated, time: .omitted))
+                            .font(AppStyle.FontStyle.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.6), in: Capsule())
+                            .padding(12)
+
+                        Spacer()
+
+                        Text(right.date.formatted(date: .abbreviated, time: .omitted))
+                            .font(AppStyle.FontStyle.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.6), in: Capsule())
+                            .padding(12)
+                    }
+                    .allowsHitTesting(false)
                 }
             }
         }
-        .padding(8)
+        .clipShape(RoundedRectangle(cornerRadius: AppStyle.Corner.lg))
     }
     
     private func sliderView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
         GeometryReader { geo in
-            ZStack {
-                // Left image (base layer)
+            ZStack(alignment: .leading) {
+                // Left image (base layer - always full width, masked to show left of slider)
                 Image(uiImage: leftImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: width, height: height)
+                    .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
+                    .mask {
+                        Rectangle()
+                            .frame(width: geo.size.width * sliderPosition)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                // Right image (masked overlay)
+                // Right image (overlay - always full width, masked to show right of slider)
                 Image(uiImage: rightImg)
                     .resizable()
                     .aspectRatio(contentMode: fitImage ? .fit : .fill)
-                    .frame(width: width, height: height)
+                    .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
-                    .mask(alignment: .leading) {
+                    .mask {
                         Rectangle()
-                            .frame(width: width - (width * sliderPosition))
-                            .offset(x: width * sliderPosition)
+                            .frame(width: geo.size.width * (1 - sliderPosition))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
 
-                // Divider line with handle
-                VStack {
+                // Divider line (visual only, no interaction)
+                ZStack {
+                    // Vertical line
+                    Rectangle()
+                        .fill(.white)
+                        .frame(width: 3)
+                        .shadow(color: .black.opacity(0.5), radius: 2)
+
+                    // Handle circle
                     Circle()
-                        .fill(AppStyle.Colors.textPrimary)
-                        .frame(width: 40, height: 40)
+                        .fill(.white)
+                        .frame(width: 44, height: 44)
+                        .shadow(color: .black.opacity(0.3), radius: 4)
                         .overlay(
                             Image(systemName: "arrow.left.and.right")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(AppStyle.Colors.bgDark)
                         )
-                        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        .position(x: 0, y: geo.size.height / 2)
                 }
-                .frame(maxHeight: .infinity)
                 .frame(width: 3)
-                .background(AppStyle.Colors.textPrimary)
-                .position(x: geo.size.width * sliderPosition, y: geo.size.height / 2)
+                .offset(x: geo.size.width * sliderPosition - 1.5)
                 .allowsHitTesting(false)
 
-                // Full-frame drag overlay for slider interaction
+                // Slider drag area - only center zone (60pt wide)
                 Color.clear
+                    .frame(width: 60, height: geo.size.height)
                     .contentShape(Rectangle())
+                    .offset(x: geo.size.width * sliderPosition - 30)
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
-                                let newPosition = value.location.x / geo.size.width
+                                // Calculate new position: start position + drag translation
+                                let startX = geo.size.width * dragStartPosition
+                                let newX = startX + value.translation.width
+                                let newPosition = newX / geo.size.width
                                 sliderPosition = min(max(newPosition, 0), 1)
+                            }
+                            .onEnded { _ in
+                                // Update drag start position when drag ends
+                                dragStartPosition = sliderPosition
                             }
                     )
 

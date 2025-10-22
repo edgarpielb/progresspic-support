@@ -23,19 +23,13 @@ struct JourneyWatchSheet: View {
                 Color(red: 30/255, green: 32/255, blue: 35/255)
                     .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    Spacer().frame(height: 8)
-
-                    JourneyWatchView(
-                        journey: journey,
-                        photos: photos,
-                        isExporting: $isExporting,
-                        exportProgress: $exportProgress,
-                        exportedVideoURL: $exportedVideoURL
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                }
+                JourneyWatchView(
+                    journey: journey,
+                    photos: photos,
+                    isExporting: $isExporting,
+                    exportProgress: $exportProgress,
+                    exportedVideoURL: $exportedVideoURL
+                )
             }
             .navigationTitle("Watch Progress")
             .navigationBarTitleDisplayMode(.inline)
@@ -128,7 +122,7 @@ struct JourneyWatchView: View {
     @State private var dateFormat: DateFormat = .classic
     @State private var dateFont: DateFont = .system
     @State private var dateColor: Color = .white
-    @State private var showWatermark = false
+    @State private var showWatermark = true
     @State private var reversePlayback = false
     @State private var useCrossfade = false
     @State private var activeSettingsPanel: SettingsPanel? = nil
@@ -190,7 +184,7 @@ struct JourneyWatchView: View {
     }
 
     var body: some View {
-        VStack(spacing: AppStyle.Spacing.lg) {
+        VStack(spacing: 0) {
             if chronologicalPhotos.isEmpty {
                 emptyState
             } else if chronologicalPhotos.count == 1 {
@@ -198,7 +192,10 @@ struct JourneyWatchView: View {
             } else {
                 normalState
             }
+
+            Spacer(minLength: 0)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: isPlaying) { _, playing in
             if playing {
                 startPlayback()
@@ -213,7 +210,6 @@ struct JourneyWatchView: View {
         .onDisappear {
             isPlaying = false
         }
-        .animation(.easeInOut(duration: 0.2), value: activeSettingsPanel)
     }
     
     private var emptyState: some View {
@@ -249,18 +245,20 @@ struct JourneyWatchView: View {
     }
     
     private var normalState: some View {
-        VStack(spacing: 8) {
-            // Main photo display with overlay play/pause button
+        VStack(spacing: 0) {
+            // Main photo display with overlay play/pause button - pinned to top
             if currentIndex < chronologicalPhotos.count {
                 let displayIndex = reversePlayback ? (chronologicalPhotos.count - 1 - currentIndex) : currentIndex
                 let displayPhoto = chronologicalPhotos[displayIndex]
-                
+
                 ZStack(alignment: .bottomTrailing) {
+                    // Photo display - instant or crossfade
                     PhotoGridItem(photo: displayPhoto)
                         .frame(maxWidth: .infinity)
                         .id(displayPhoto.id)
-                        .opacity(useCrossfade && isPlaying ? 0.95 : 1.0)
-                        .animation(useCrossfade ? .easeInOut(duration: 0.3) : nil, value: currentIndex)
+                        .transition(.opacity)
+                        .animation(useCrossfade ? .easeInOut(duration: min(0.3, 0.8 / playbackSpeed)) : nil, value: displayPhoto.id)
+                        .drawingGroup() // Optimize rendering
                     
                     // Date overlay
                     if showDateOverlay {
@@ -302,12 +300,12 @@ struct JourneyWatchView: View {
                         VStack {
                             Spacer()
                             HStack {
+                                Spacer()
                                 Text("ProgressPic")
                                     .font(.system(.caption2, design: .rounded, weight: .bold))
                                     .foregroundColor(.white.opacity(0.6))
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 4)
-                                Spacer()
                             }
                         }
                         .padding(12)
@@ -328,14 +326,16 @@ struct JourneyWatchView: View {
                 }
             }
 
-            // Position indicator: "1 / N • Date"
-            let displayIdx = reversePlayback ? (chronologicalPhotos.count - 1 - currentIndex) : currentIndex
-            Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[displayIdx].date.formatted(date: .abbreviated, time: .omitted))")
-                .font(AppStyle.FontStyle.caption)
-                .foregroundColor(AppStyle.Colors.textSecondary)
-            
-            // Scrubber slider with skip buttons
-            HStack(spacing: 12) {
+            // Controls section with padding
+            VStack(spacing: 8) {
+                // Position indicator: "1 / N • Date"
+                let displayIdx = reversePlayback ? (chronologicalPhotos.count - 1 - currentIndex) : currentIndex
+                Text("\(currentIndex + 1) / \(chronologicalPhotos.count) • \(chronologicalPhotos[displayIdx].date.formatted(date: .abbreviated, time: .omitted))")
+                    .font(AppStyle.FontStyle.caption)
+                    .foregroundColor(AppStyle.Colors.textSecondary)
+
+                // Scrubber slider with skip buttons
+                HStack(spacing: 12) {
                 // Previous button
                 Button(action: {
                     isPlaying = false  // Stop playback when manually navigating
@@ -454,7 +454,7 @@ struct JourneyWatchView: View {
             
             // Expandable settings panels
             if let panel = activeSettingsPanel {
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     switch panel {
                     case .speed:
                         speedSettingsPanel
@@ -466,7 +466,8 @@ struct JourneyWatchView: View {
                         EmptyView()
                     }
                 }
-                .padding()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color.white.opacity(0.06))
@@ -475,42 +476,43 @@ struct JourneyWatchView: View {
                                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
                         )
                 )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.2), value: activeSettingsPanel)
             }
 
-            // Export progress indicator (only shows when exporting)
-            if isExporting {
-                VStack(spacing: 8) {
-                    ProgressView(value: exportProgress, total: 1.0)
-                        .progressViewStyle(.linear)
-                        .tint(AppStyle.Colors.accentCyan)
+                // Export progress indicator (only shows when exporting)
+                if isExporting {
+                    VStack(spacing: 8) {
+                        ProgressView(value: exportProgress, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .tint(AppStyle.Colors.accentCyan)
 
-                    Text("Exporting: \(Int(exportProgress * 100))%")
-                        .font(AppStyle.FontStyle.caption)
-                        .foregroundColor(AppStyle.Colors.textSecondary)
+                        Text("Exporting: \(Int(exportProgress * 100))%")
+                            .font(AppStyle.FontStyle.caption)
+                            .foregroundColor(AppStyle.Colors.textSecondary)
+                    }
+                    .padding()
+                    .glassCard()
                 }
-                .padding()
-                .glassCard()
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
         }
     }
     
     // Settings panels
     private var speedSettingsPanel: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Text("Playback Speed")
                 .font(AppStyle.FontStyle.caption)
                 .foregroundColor(AppStyle.Colors.textSecondary)
             
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach([0.5, 1.0, 2.0, 5.0, 10.0, 20.0], id: \.self) { speed in
                     Button(action: { playbackSpeed = speed }) {
                         Text(speed < 1.0 ? String(format: "%.1fx", speed) : "\(Int(speed))x")
                             .font(AppStyle.FontStyle.caption.bold())
                             .foregroundColor(playbackSpeed == speed ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(playbackSpeed == speed ? AppStyle.Colors.accentCyan.opacity(0.2) : Color.clear)
@@ -526,7 +528,7 @@ struct JourneyWatchView: View {
     }
     
     private var dateSettingsPanel: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // Date on/off toggle
             HStack {
                 Text("Show Date")
@@ -541,19 +543,19 @@ struct JourneyWatchView: View {
             
             if showDateOverlay {
                 // Position selector
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Position")
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textTertiary)
                     
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach(DatePosition.allCases, id: \.self) { position in
                             Button(action: { datePosition = position }) {
                                 Text(position.rawValue)
                                     .font(.system(.caption2, design: .rounded))
                                     .foregroundColor(datePosition == position ? .white : AppStyle.Colors.textSecondary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
                                             .fill(datePosition == position ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
@@ -564,19 +566,19 @@ struct JourneyWatchView: View {
                 }
                 
                 // Format selector
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Format")
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textTertiary)
                     
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach(DateFormat.allCases, id: \.self) { format in
                             Button(action: { dateFormat = format }) {
                                 Text(format.rawValue)
                                     .font(.system(.caption2, design: .rounded))
                                     .foregroundColor(dateFormat == format ? .white : AppStyle.Colors.textSecondary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
                                             .fill(dateFormat == format ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
@@ -587,19 +589,19 @@ struct JourneyWatchView: View {
                 }
                 
                 // Font selector
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Font")
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textTertiary)
                     
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach(DateFont.allCases, id: \.self) { font in
                             Button(action: { dateFont = font }) {
                                 Text(font.rawValue)
                                     .font(.system(.caption2, design: .rounded))
                                     .foregroundColor(dateFont == font ? .white : AppStyle.Colors.textSecondary)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
                                             .fill(dateFont == font ? AppStyle.Colors.accentCyan : Color.white.opacity(0.08))
@@ -610,17 +612,17 @@ struct JourneyWatchView: View {
                 }
                 
                 // Color selector
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Color")
                         .font(AppStyle.FontStyle.caption)
                         .foregroundColor(AppStyle.Colors.textTertiary)
                     
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach([Color.white, Color.black, Color.cyan, Color.pink, Color.yellow], id: \.self) { color in
                             Button(action: { dateColor = color }) {
                                 Circle()
                                     .fill(color)
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: 22, height: 22)
                                     .overlay(
                                         Circle()
                                             .stroke(dateColor == color ? AppStyle.Colors.accentCyan : Color.white.opacity(0.2), lineWidth: 2)
@@ -634,7 +636,7 @@ struct JourneyWatchView: View {
     }
     
     private var animationSettingsPanel: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             // Crossfade toggle
             HStack {
                 Text("Crossfade")
@@ -655,7 +657,7 @@ struct JourneyWatchView: View {
     
     private func startPlayback() {
         guard isPlaying && !chronologicalPhotos.isEmpty else { return }
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + (1.0 / playbackSpeed)) {
             if self.isPlaying {
                 if self.reversePlayback {
@@ -688,16 +690,17 @@ struct ControlIconButton: View {
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Image(systemName: icon)
-                    .font(.system(size: 18))
+                    .font(.system(size: 17))
                     .foregroundColor(isActive ? AppStyle.Colors.accentCyan : AppStyle.Colors.textSecondary)
-                
+
                 Text(label)
                     .font(.system(.caption2, design: .rounded))
                     .foregroundColor(isActive ? AppStyle.Colors.accentCyan : AppStyle.Colors.textTertiary)
             }
-            .frame(width: 60, height: 50)
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isActive ? AppStyle.Colors.accentCyan.opacity(0.15) : Color.white.opacity(0.06))
