@@ -192,8 +192,6 @@ struct JourneyWatchView: View {
             } else {
                 normalState
             }
-
-            Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: isPlaying) { _, playing in

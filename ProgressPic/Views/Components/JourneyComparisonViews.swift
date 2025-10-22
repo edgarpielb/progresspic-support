@@ -625,10 +625,11 @@ struct ImprovedCompareCanvas: View {
                 .allowsHitTesting(false)
 
                 // Slider drag area - only center zone (60pt wide)
-                Color.clear
-                    .frame(width: 60, height: geo.size.height)
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: 60)
                     .contentShape(Rectangle())
-                    .offset(x: geo.size.width * sliderPosition - 30)
+                    .position(x: geo.size.width * sliderPosition, y: geo.size.height / 2)
                     .highPriorityGesture(
                         DragGesture(minimumDistance: 5)
                             .onChanged { value in
