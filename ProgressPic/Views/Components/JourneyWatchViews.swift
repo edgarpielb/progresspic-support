@@ -19,7 +19,7 @@ struct JourneyWatchSheet: View {
 
     var body: some View {
         NavigationView {
-            ZStack {
+            ZStack(alignment: .top) {
                 Color(red: 30/255, green: 32/255, blue: 35/255)
                     .ignoresSafeArea()
 

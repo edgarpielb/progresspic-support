@@ -174,7 +174,7 @@ struct JourneyCompareView: View {
                     GeometryReader { geometry in
                         let availableWidth = geometry.size.width
                         let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
-                        
+
                         ZStack {
                             ImprovedCompareCanvas(
                                 left: left,
@@ -375,8 +375,8 @@ struct JourneyCompareView: View {
                             }
                         }
                     }
-                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0) // Reserve space for GeometryReader with 4:5 ratio
                     }
+                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0) // Reserve space for GeometryReader with 4:5 ratio
                 } else {
                     // Empty state
                     GeometryReader { geometry in
@@ -629,8 +629,8 @@ struct ImprovedCompareCanvas: View {
                     .frame(width: 60, height: geo.size.height)
                     .contentShape(Rectangle())
                     .offset(x: geo.size.width * sliderPosition - 30)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 5)
                             .onChanged { value in
                                 // Calculate new position: start position + drag translation
                                 let startX = geo.size.width * dragStartPosition
