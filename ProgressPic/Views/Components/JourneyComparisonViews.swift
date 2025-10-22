@@ -486,6 +486,7 @@ struct ImprovedCompareCanvas: View {
     @State private var leftImg: UIImage?
     @State private var rightImg: UIImage?
     @State private var dragStartPosition: CGFloat = 0.5
+    @State private var isDragging: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -514,8 +515,10 @@ struct ImprovedCompareCanvas: View {
             Task { await loadImages() }
         }
         .onChange(of: sliderPosition) { _, newValue in
-            // Sync dragStartPosition when sliderPosition changes externally
-            dragStartPosition = newValue
+            // Sync dragStartPosition when sliderPosition changes externally (but not during drag)
+            if !isDragging {
+                dragStartPosition = newValue
+            }
         }
     }
     
@@ -633,13 +636,16 @@ struct ImprovedCompareCanvas: View {
                     .highPriorityGesture(
                         DragGesture(minimumDistance: 5)
                             .onChanged { value in
-                                // Calculate new position: start position + drag translation
-                                let startX = geo.size.width * dragStartPosition
-                                let newX = startX + value.translation.width
+                                isDragging = true
+                                // Calculate new position based on drag translation
+                                // translation.width is in screen points, so we add it directly to the current position
+                                let currentX = geo.size.width * dragStartPosition
+                                let newX = currentX + value.translation.width
                                 let newPosition = newX / geo.size.width
                                 sliderPosition = min(max(newPosition, 0), 1)
                             }
                             .onEnded { _ in
+                                isDragging = false
                                 // Update drag start position when drag ends
                                 dragStartPosition = sliderPosition
                             }

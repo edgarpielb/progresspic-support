@@ -30,6 +30,7 @@ struct JourneyWatchSheet: View {
                     exportProgress: $exportProgress,
                     exportedVideoURL: $exportedVideoURL
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .navigationTitle("Watch Progress")
             .navigationBarTitleDisplayMode(.inline)
@@ -184,16 +185,18 @@ struct JourneyWatchView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if chronologicalPhotos.isEmpty {
-                emptyState
-            } else if chronologicalPhotos.count == 1 {
-                singlePhotoState
-            } else {
-                normalState
+        ScrollView {
+            VStack(spacing: 0) {
+                if chronologicalPhotos.isEmpty {
+                    emptyState
+                } else if chronologicalPhotos.count == 1 {
+                    singlePhotoState
+                } else {
+                    normalState
+                }
             }
+            .padding(.top, 8)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: isPlaying) { _, playing in
             if playing {
                 startPlayback()
