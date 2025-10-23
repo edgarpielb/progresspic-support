@@ -508,21 +508,68 @@ struct JourneyCompareView: View {
         guard let leftPhoto = left, let rightPhoto = right else { return }
         
         Task {
-            // Load images at screen resolution
+            // Load images at high resolution for sharing
             let screenWidth = UIScreen.main.bounds.width
             let targetSize = CGSize(width: screenWidth * UIScreen.main.scale, height: screenWidth * UIScreen.main.scale * 5.0 / 4.0)
-            
-            guard let leftImg = await PhotoStore.fetchUIImage(localId: leftPhoto.assetLocalId, targetSize: targetSize),
-                  let rightImg = await PhotoStore.fetchUIImage(localId: rightPhoto.assetLocalId, targetSize: targetSize) else {
+
+            // Always load from assetLocalId for display (already transformed)
+            guard let leftImg = await PhotoStore.fetchUIImage(localId: leftPhoto.assetLocalId, targetSize: CGSize(width: 2400, height: 2400)),
+                  let rightImg = await PhotoStore.fetchUIImage(localId: rightPhoto.assetLocalId, targetSize: CGSize(width: 2400, height: 2400)) else {
                 return
             }
-            
+
+            // assetLocalId always contains the display-ready images
+            // No transform needed - they were already applied when saved
+
             // Render the comparison image
             let image = await renderComparisonImage(leftImg: leftImg, rightImg: rightImg, size: targetSize)
-            
+
             await MainActor.run {
                 shareImage = image
             }
+        }
+    }
+
+    // Removed - now using TransformRenderer.renderTransformedImage
+    private func renderTransformedImageForShare_REMOVED(image: UIImage, transform: AlignTransform, targetSize: CGSize) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+
+            // Calculate how the image fits FIRST (this is what .scaledToFit does)
+            let imageAspect = image.size.width / image.size.height
+            let targetAspect = targetSize.width / targetSize.height
+
+            var drawSize: CGSize
+            if imageAspect > targetAspect {
+                // Image is wider - fit by width
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                // Image is taller - fit by height
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+
+            // Move to center of crop area
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+
+            // Apply user transforms (these are relative to the fitted image)
+            // Important: scale is relative to fit scale, offset is in screen points
+            let safeScale = max(transform.scale, 0.001)
+            ctx.cgContext.scaleBy(x: safeScale, y: safeScale)
+            ctx.cgContext.translateBy(x: transform.offsetX / safeScale, y: transform.offsetY / safeScale)
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+
+            // Draw the image at its fitted size (already calculated above)
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+
+            image.draw(in: drawRect)
         }
     }
     
@@ -1273,23 +1320,61 @@ struct ImprovedCompareCanvas: View {
     }
     
     private func loadImages() async {
-        // Capture asset IDs on main actor to avoid Sendable warnings
+        // Always load from assetLocalId for display (already transformed)
+
+        // Capture values before async operations to avoid Sendable warnings
         let leftLocalId = left.assetLocalId
         let rightLocalId = right.assetLocalId
-        
-        // Calculate target size for downsampling
-        let screenSize = UIScreen.main.bounds.size
-        let scale = UIScreen.main.scale
-        let targetSize = CGSize(
-            width: screenSize.width * scale / 2,  // Half width for side-by-side
-            height: screenSize.height * scale / 2
-        )
-        
+
         // Load both images concurrently
-        async let leftTask = PhotoStore.fetchUIImage(localId: leftLocalId, targetSize: targetSize)
-        async let rightTask = PhotoStore.fetchUIImage(localId: rightLocalId, targetSize: targetSize)
-        
+        async let leftTask = PhotoStore.fetchUIImage(localId: leftLocalId, targetSize: CGSize(width: 2400, height: 2400))
+        async let rightTask = PhotoStore.fetchUIImage(localId: rightLocalId, targetSize: CGSize(width: 2400, height: 2400))
+
+        // assetLocalId always contains the display-ready images
         leftImg = await leftTask
         rightImg = await rightTask
+    }
+
+    // Removed - now using TransformRenderer.renderTransformedImage
+    private func renderTransformedImage_REMOVED(image: UIImage, transform: AlignTransform, targetSize: CGSize) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { ctx in
+            // Fill background
+            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+
+            // Calculate how the image fits FIRST (this is what .scaledToFit does)
+            let imageAspect = image.size.width / image.size.height
+            let targetAspect = targetSize.width / targetSize.height
+
+            var drawSize: CGSize
+            if imageAspect > targetAspect {
+                // Image is wider - fit by width
+                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
+            } else {
+                // Image is taller - fit by height
+                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
+            }
+
+            // Move to center of crop area
+            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+
+            // Apply user transforms (these are relative to the fitted image)
+            // Important: scale is relative to fit scale, offset is in screen points
+            let safeScale = max(transform.scale, 0.001)
+            ctx.cgContext.scaleBy(x: safeScale, y: safeScale)
+            ctx.cgContext.translateBy(x: transform.offsetX / safeScale, y: transform.offsetY / safeScale)
+            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
+
+            // Draw the image at its fitted size (already calculated above)
+            let drawRect = CGRect(
+                x: -drawSize.width / 2,
+                y: -drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+
+            image.draw(in: drawRect)
+        }
     }
 }
