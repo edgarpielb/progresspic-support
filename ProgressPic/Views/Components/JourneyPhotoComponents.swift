@@ -115,19 +115,13 @@ struct JourneyPhotoCollage: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .task {
             if loadedImages[photo.id] == nil {
-                // Load original if available
-                let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+                // Always load from assetLocalId for display (it's already transformed)
                 if let img = await PhotoStore.fetchUIImage(
-                    localId: imageId,
+                    localId: photo.assetLocalId,
                     targetSize: CGSize(width: 400, height: 500)
                 ) {
-                    // Apply transform if needed
-                    if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
-                       photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
-                        loadedImages[photo.id] = renderTransformedImage(image: img, transform: photo.alignTransform, targetSize: CGSize(width: 400, height: 500))
-                    } else {
-                        loadedImages[photo.id] = img
-                    }
+                    // assetLocalId always contains the display-ready image
+                    loadedImages[photo.id] = img
                 }
             }
         }
@@ -152,62 +146,19 @@ struct JourneyPhotoCollage: View {
         .clipped()
         .task {
             if loadedImages[photo.id] == nil {
-                // Load original if available
-                let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
+                // Always load from assetLocalId for display (it's already transformed)
                 if let img = await PhotoStore.fetchUIImage(
-                    localId: imageId,
+                    localId: photo.assetLocalId,
                     targetSize: CGSize(width: 200, height: 250)
                 ) {
-                    // Apply transform if needed
-                    if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
-                       photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
-                        loadedImages[photo.id] = renderTransformedImage(image: img, transform: photo.alignTransform, targetSize: CGSize(width: 200, height: 250))
-                    } else {
-                        loadedImages[photo.id] = img
-                    }
+                    // assetLocalId always contains the display-ready image
+                    loadedImages[photo.id] = img
                 }
             }
         }
     }
     
-    private func renderTransformedImage(image: UIImage, transform: AlignTransform, targetSize: CGSize) -> UIImage {
-        // Apply transform to create the display image
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { ctx in
-            // Fill background
-            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
-            
-            // Move to center
-            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
-            
-            // Apply transform
-            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
-            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
-            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
-            
-            // Calculate fit
-            let imageAspect = image.size.width / image.size.height
-            let targetAspect = targetSize.width / targetSize.height
-            
-            var drawSize: CGSize
-            if imageAspect > targetAspect {
-                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
-            } else {
-                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
-            }
-            
-            // Draw centered
-            let drawRect = CGRect(
-                x: -drawSize.width / 2,
-                y: -drawSize.height / 2,
-                width: drawSize.width,
-                height: drawSize.height
-            )
-            
-            image.draw(in: drawRect)
-        }
-    }
+    // Removed - now using TransformRenderer.renderTransformedImage
 }
 
 struct JourneyCoverThumb: View {
@@ -260,50 +211,14 @@ struct JourneyCoverThumb: View {
     }
     
     private func loadCoverImage(_ photo: ProgressPhoto) async {
-        // Load original if available
-        let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
-        if let loadedImg = await PhotoStore.fetchUIImage(localId: imageId, targetSize: CGSize(width: 120, height: 120)) {
-            // Apply transform if needed
-            if photo.alignTransform.scale != 1 || photo.alignTransform.offsetX != 0 || 
-               photo.alignTransform.offsetY != 0 || photo.alignTransform.rotation != 0 {
-                img = renderTransformedCover(image: loadedImg, transform: photo.alignTransform)
-            } else {
-                img = loadedImg
-            }
+        // Always load from assetLocalId for display (it's already transformed)
+        if let loadedImg = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 120, height: 120)) {
+            // assetLocalId always contains the display-ready image
+            img = loadedImg
         }
     }
     
-    private func renderTransformedCover(image: UIImage, transform: AlignTransform) -> UIImage {
-        let targetSize = CGSize(width: 120, height: 120)
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { ctx in
-            // Fill background
-            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
-            
-            // Move to center
-            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
-            
-            // Apply transform
-            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
-            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
-            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
-            
-            // Calculate fit - for square thumbnail, center crop
-            let scale = max(targetSize.width / image.size.width, targetSize.height / image.size.height)
-            let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-            
-            // Draw centered
-            let drawRect = CGRect(
-                x: -drawSize.width / 2,
-                y: -drawSize.height / 2,
-                width: drawSize.width,
-                height: drawSize.height
-            )
-            
-            image.draw(in: drawRect)
-        }
-    }
+    // Removed - now using TransformRenderer.renderThumbnail
 }
 
 struct CoverThumb: View {
@@ -347,15 +262,12 @@ struct PhotoGridItem: View {
         GeometryReader { geometry in
             ZStack(alignment: .center) {
                 if let img = image {
-                    // Apply transform to show cropped version
-                    let transform = photo.alignTransform
                     let itemHeight = geometry.size.width * 5.0/4.0 // 4:5 ratio height
                     
-                    // Always render with transform for consistency
-                    let displayImage = renderTransformedThumbnail(image: img, transform: transform, size: geometry.size.width)
-                    Image(uiImage: displayImage)
+                    // Image is already transformed in loadImage()
+                    Image(uiImage: img)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(4.0/5.0, contentMode: .fill)
                         .frame(width: geometry.size.width, height: itemHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
@@ -437,11 +349,13 @@ struct PhotoGridItem: View {
                 }
             }
 
-            // Load original if available, otherwise use the stored image
-            let imageId = photo.originalAssetLocalId ?? photo.assetLocalId
-            if let loadedImage = await PhotoStore.fetchUIImage(localId: imageId, targetSize: targetSize) {
+            // Always load from assetLocalId for display (it's already transformed)
+            if let loadedImage = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize) {
                 loadingTask.cancel()
                 guard !Task.isCancelled else { return }
+                
+                // assetLocalId always contains the display-ready image
+                // No transform needed - it was already applied when saved
                 await MainActor.run {
                     self.image = loadedImage
                     self.isLoading = false
@@ -458,50 +372,6 @@ struct PhotoGridItem: View {
         }
     }
     
-    private func renderTransformedThumbnail(image: UIImage, transform: AlignTransform, size: CGFloat) -> UIImage {
-        // Render the final 4:5 cropped thumbnail with transform applied
-        // Use consistent logic with PhotoEditSheet
-        let targetWidth = size * UIScreen.main.scale * 2 // 2x for retina quality
-        let targetHeight = targetWidth * 5.0 / 4.0 // 4:5 ratio
-        let targetSize = CGSize(width: targetWidth, height: targetHeight)
-        
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        return renderer.image { ctx in
-            // Fill background
-            ctx.cgContext.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            ctx.cgContext.fill(CGRect(origin: .zero, size: targetSize))
-            
-            // Move to center of crop area
-            ctx.cgContext.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
-            
-            // Apply user's transform
-            ctx.cgContext.rotate(by: CGFloat(transform.rotation))
-            ctx.cgContext.scaleBy(x: transform.scale, y: transform.scale)
-            ctx.cgContext.translateBy(x: transform.offsetX, y: transform.offsetY)
-            
-            // Calculate how the image fits (scaledToFit logic)
-            let imageAspect = image.size.width / image.size.height
-            let cropAspect = targetSize.width / targetSize.height
-            
-            var drawSize: CGSize
-            if imageAspect > cropAspect {
-                // Image is wider - fit by width
-                drawSize = CGSize(width: targetSize.width, height: targetSize.width / imageAspect)
-            } else {
-                // Image is taller - fit by height
-                drawSize = CGSize(width: targetSize.height * imageAspect, height: targetSize.height)
-            }
-            
-            // Draw centered
-            let drawRect = CGRect(
-                x: -drawSize.width / 2,
-                y: -drawSize.height / 2,
-                width: drawSize.width,
-                height: drawSize.height
-            )
-            
-            image.draw(in: drawRect)
-        }
-    }
+    // Removed - now using TransformRenderer.renderThumbnail
 }
 

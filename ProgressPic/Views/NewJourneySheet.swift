@@ -15,6 +15,7 @@ struct NewJourneySheet: View {
 
     @State private var name = ""
     @State private var saveToCameraRoll = false
+    @State private var syncStartDate = true
     @State private var tempReminders: [TempReminder] = []
     @State private var showEditReminder = false
     @State private var editingReminder: TempReminder? = nil
@@ -45,8 +46,8 @@ struct NewJourneySheet: View {
                                 Text("Reminders")
                                     .font(.title2)
                                     .foregroundColor(.white)
-                                
-                                Text("Set up reminders to help you crush your new habit goals.")
+
+                                Text("Set up reminders to help you remember to take progress pics.")
                                     .font(.body)
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.leading)
@@ -113,7 +114,7 @@ struct NewJourneySheet: View {
                             Text("Settings")
                                 .font(.title2)
                                 .foregroundColor(.white)
-                            
+
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Save to Camera Roll")
@@ -125,6 +126,21 @@ struct NewJourneySheet: View {
                                 }
                                 Spacer()
                                 Toggle("", isOn: $saveToCameraRoll)
+                                    .labelsHidden()
+                                    .tint(.blue)
+                            }
+
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Sync Start Date with First Photo")
+                                        .font(.body)
+                                        .foregroundColor(.white)
+                                    Text("Set journey start date to match your first imported photo")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                Spacer()
+                                Toggle("", isOn: $syncStartDate)
                                     .labelsHidden()
                                     .tint(.blue)
                             }
@@ -163,7 +179,8 @@ struct NewJourneySheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
                         let j = Journey(name: name.isEmpty ? "My Journey" : name,
-                                        saveToCameraRoll: saveToCameraRoll)
+                                        saveToCameraRoll: saveToCameraRoll,
+                                        autoSyncStartDate: syncStartDate)
                         ctx.insert(j)
 
                         // Add reminders to the journey
@@ -182,6 +199,9 @@ struct NewJourneySheet: View {
                         do {
                             try ctx.save()
                             print("✅ Journey '\(j.name)' created and saved successfully")
+                            if syncStartDate {
+                                print("🔄 Journey will auto-sync start date with first photo")
+                            }
                             ReminderManager.schedule(for: j)
                             dismiss()
                         } catch {

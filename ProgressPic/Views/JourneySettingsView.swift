@@ -13,6 +13,7 @@ struct JourneySettingsView: View {
     }
     @State private var journeyName: String = ""
     @State private var saveToCameraRoll: Bool = true
+    @State private var autoSyncStartDate: Bool = true
     @State private var showDeleteAlert = false
     @State private var showEditReminder = false
     @State private var editingReminder: JourneyReminder? = nil
@@ -72,6 +73,7 @@ struct JourneySettingsView: View {
         .onAppear {
             journeyName = journey.name
             saveToCameraRoll = journey.saveToCameraRoll
+            autoSyncStartDate = journey.autoSyncStartDate
         }
         .alert("Delete Journey", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
@@ -173,7 +175,7 @@ struct JourneySettingsView: View {
             Text("Settings")
                 .font(.title2)
                 .foregroundColor(.white)
-            
+
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Save to Camera Roll")
@@ -183,10 +185,27 @@ struct JourneySettingsView: View {
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                 }
-                
+
                 Spacer()
-                
+
                 Toggle("", isOn: $saveToCameraRoll)
+                    .labelsHidden()
+                    .tint(.blue)
+            }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Auto-Sync Start Date")
+                        .font(.body)
+                        .foregroundColor(.white)
+                    Text("Automatically sync start date when importing photos")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $autoSyncStartDate)
                     .labelsHidden()
                     .tint(.blue)
             }
@@ -198,7 +217,7 @@ struct JourneySettingsView: View {
             Text("Journey Info")
                 .font(.title2)
                 .foregroundColor(.white)
-            
+
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Created")
@@ -208,9 +227,9 @@ struct JourneySettingsView: View {
                         .font(.body)
                         .foregroundColor(.white)
                 }
-                
+
                 Spacer()
-                
+
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("Photos")
                         .font(.caption)
@@ -219,6 +238,42 @@ struct JourneySettingsView: View {
                         .font(.body)
                         .foregroundColor(.white)
                 }
+            }
+
+            // Sync start date button
+            if let firstPhoto = journey.photos?.sorted(by: { $0.date < $1.date }).first,
+               firstPhoto.date != journey.createdAt {
+                Button(action: syncStartDateWithFirstPhoto) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.title3)
+                            .foregroundColor(.cyan)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sync Start Date with First Photo")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                            Text("Set journey start to \(firstPhoto.date.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .padding()
+                    .background(Color.cyan.opacity(0.1))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -268,12 +323,26 @@ struct JourneySettingsView: View {
     private func saveSettings() {
         journey.name = journeyName.trimmingCharacters(in: .whitespacesAndNewlines)
         journey.saveToCameraRoll = saveToCameraRoll
-        
+        journey.autoSyncStartDate = autoSyncStartDate
+
         // Reschedule reminders with updated times
         ReminderManager.schedule(for: journey)
-        
+
         try? ctx.save()
         dismiss()
+    }
+
+    private func syncStartDateWithFirstPhoto() {
+        guard let firstPhoto = journey.photos?.sorted(by: { $0.date < $1.date }).first else {
+            return
+        }
+
+        withAnimation {
+            journey.createdAt = firstPhoto.date
+        }
+
+        try? ctx.save()
+        print("✅ Synced journey start date to first photo: \(firstPhoto.date.formatted())")
     }
     
     private func formatDays(_ bitmask: Int) -> String {

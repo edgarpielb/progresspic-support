@@ -278,8 +278,8 @@ struct ImportPhotosView: View {
                     let localId: String
                     let date: Date
 
-                    // For imported photos, copy them to app directory to avoid photo library dependency
-                    localId = try await PhotoStore.saveToAppDirectory(photoData.image)
+                    // For imported photos, first save the original
+                    let originalId = try await PhotoStore.saveToAppDirectory(photoData.image)
 
                     // Use the EXIF date that was extracted during photo selection
                     // If no EXIF date was found, fall back to current date
@@ -309,13 +309,24 @@ struct ImportPhotosView: View {
                     // Calculate initial transform to fill 4:5 aspect ratio
                     let initialTransform = calculateInitialTransform(for: photoData.image.size)
                     
-                    // Create progress photo entry
+                    // Render the cropped display version with the transform applied
+                    let croppedImage = TransformRenderer.renderTransformedImage(
+                        sourceImage: photoData.image,
+                        transform: initialTransform,
+                        targetSize: CGSize(width: 1200, height: 1500)
+                    )
+                    
+                    // Save the cropped version as the display image
+                    localId = try await PhotoStore.saveToAppDirectory(croppedImage)
+                    
+                    // Create progress photo entry with both original and cropped versions
                     let progressPhoto = ProgressPhoto(
                         journeyId: journey.id,
                         date: date,
-                        assetLocalId: localId,
+                        assetLocalId: localId,  // Cropped display version
                         isFrontCamera: false, // Assume imported photos are not selfies
-                        alignTransform: initialTransform
+                        alignTransform: initialTransform,
+                        originalAssetLocalId: originalId  // Keep original for re-editing
                     )
                     progressPhoto.journey = journey  // Set the relationship
                     

@@ -3,7 +3,11 @@
     "allow": [
       "Bash(tee:*)",
       "Read(//private/tmp/**)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(for file in \"./ProgressPic/Views/Components/JourneyComparisonViews.swift\" \"./ProgressPic/Views/Components/PhotoEditViews.swift\" \"./ProgressPic/Views/Components/JourneyPhotoComponents.swift\" \"./ProgressPic/Views/Components/JourneyWatchViews.swift\" \"./ProgressPic/Views/AdjustView.swift\")",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

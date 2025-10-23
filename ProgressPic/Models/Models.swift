@@ -39,6 +39,7 @@ final class Journey {
     var createdAt: Date = Date.now
     var coverAssetLocalId: String? = nil   // PHAsset localIdentifier
     var saveToCameraRoll: Bool = false
+    var autoSyncStartDate: Bool = true  // Auto-sync start date with first photo
     var template: String? = nil
     var sortOrder: Int = 0  // For manual reordering
 
@@ -49,12 +50,14 @@ final class Journey {
     init(name: String,
          createdAt: Date = .now,
          saveToCameraRoll: Bool = false,
+         autoSyncStartDate: Bool = true,
          template: String? = nil,
          sortOrder: Int = 0) {
         self.id = UUID()
         self.name = name
         self.createdAt = createdAt
         self.saveToCameraRoll = saveToCameraRoll
+        self.autoSyncStartDate = autoSyncStartDate
         self.template = template
         self.sortOrder = sortOrder
     }

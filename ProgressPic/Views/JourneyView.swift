@@ -88,13 +88,13 @@ struct JourneysView: View {
                     Button {
                         showNew = true
                     } label: {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 16) {
                             Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 26, weight: .bold))
-                            Text("Add Journey").font(.headline)
+                                .font(.system(size: 36, weight: .bold))
+                            Text("Add Journey").font(.title2.bold())
                         }
                         .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, minHeight: 90)
+                        .frame(maxWidth: .infinity, minHeight: 140)
                         .glassCard(corner: 24)
                         .contentShape(RoundedRectangle(cornerRadius: 24))
                     }
@@ -557,6 +557,7 @@ struct JourneyDetailView: View {
                 }
 
                 // Save original image to app directory
+                // First save the original image
                 let originalId = try await PhotoStore.saveToAppDirectory(uiImage)
                 print("💾 Saved original image \(index + 1)/\(items.count)")
 
@@ -577,16 +578,27 @@ struct JourneyDetailView: View {
                     offsetY: 0,
                     rotation: 0
                 )
+                
+                // Render the cropped display version with the transform applied
+                let croppedImage = TransformRenderer.renderTransformedImage(
+                    sourceImage: uiImage,
+                    transform: initialTransform,
+                    targetSize: CGSize(width: 1200, height: 1500)
+                )
+                
+                // Save the cropped version as the display image
+                let croppedId = try await PhotoStore.saveToAppDirectory(croppedImage)
+                print("💾 Saved cropped image \(index + 1)/\(items.count)")
 
-                // Create progress photo entry with original ID and initial transform
+                // Create progress photo entry with both original and cropped versions
                 await MainActor.run {
                     let progressPhoto = ProgressPhoto(
                         journeyId: journey.id,
                         date: creationDate,
-                        assetLocalId: originalId,  // Use original ID directly
+                        assetLocalId: croppedId,  // Cropped display version
                         isFrontCamera: false,
                         alignTransform: initialTransform,
-                        originalAssetLocalId: nil  // No separate original needed
+                        originalAssetLocalId: originalId  // Keep original for re-editing
                     )
                     progressPhoto.journey = journey
                     ctx.insert(progressPhoto)
@@ -618,6 +630,15 @@ struct JourneyDetailView: View {
 
                 // Process pending changes to ensure photos are properly registered
                 ctx.processPendingChanges()
+
+                // Check if we should auto-sync start date with first photo
+                if journey.autoSyncStartDate,
+                   let firstPhoto = journey.photos?.sorted(by: { $0.date < $1.date }).first,
+                   firstPhoto.date < journey.createdAt {
+                    journey.createdAt = firstPhoto.date
+                    try? ctx.save()
+                    print("🔄 Auto-synced journey start date to first photo: \(firstPhoto.date.formatted())")
+                }
 
                 // Reset pagination and reload photos to show new imports immediately
                 currentPage = 0

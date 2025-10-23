@@ -265,8 +265,7 @@ struct JourneyWatchView: View {
                     // Photo display using preloaded images
                     if let cachedImage = preloadedImages[displayPhoto.assetLocalId] {
                         PreloadedPhotoView(
-                            image: cachedImage,
-                            transform: displayPhoto.alignTransform
+                            image: cachedImage
                         )
                         .frame(maxWidth: .infinity)
                         .animation(useCrossfade ? .easeInOut(duration: min(0.3, 0.8 / playbackSpeed)) : nil, value: displayPhoto.id)
@@ -698,27 +697,28 @@ struct JourneyWatchView: View {
     
     private func preloadImages() async {
         guard !chronologicalPhotos.isEmpty else { return }
-        
+
         await MainActor.run {
             isPreloading = true
             preloadProgress = 0
         }
-        
+
         let totalPhotos = chronologicalPhotos.count
         var loadedImages: [String: UIImage] = [:]
-        
+
         for (index, photo) in chronologicalPhotos.enumerated() {
-            // Load image at high resolution for crisp display (2400px max dimension)
+            // Always load from assetLocalId for display (already transformed)
             if let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 2400, height: 2400)) {
                 loadedImages[photo.assetLocalId] = image
+                print("📸 Loaded image for watch view")
             }
-            
+
             let progress = Double(index + 1) / Double(totalPhotos)
             await MainActor.run {
                 preloadProgress = progress
             }
         }
-        
+
         await MainActor.run {
             preloadedImages = loadedImages
             isPreloading = false
@@ -755,58 +755,19 @@ struct JourneyWatchView: View {
 // MARK: - Preloaded Photo View
 struct PreloadedPhotoView: View {
     let image: UIImage
-    let transform: AlignTransform
     
     var body: some View {
         GeometryReader { geometry in
             let itemHeight = geometry.size.width * 5.0/4.0 // 4:5 ratio height
-            let renderedImage = renderTransformedThumbnail(image: image, transform: transform, size: geometry.size.width)
             
-            Image(uiImage: renderedImage)
+            // Image is already transformed when loaded from assetLocalId
+            Image(uiImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: geometry.size.width, height: itemHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .aspectRatio(4.0/5.0, contentMode: .fit)
-    }
-    
-    private func renderTransformedThumbnail(image: UIImage, transform: AlignTransform, size: CGFloat) -> UIImage {
-        let targetSize = CGSize(width: size, height: size * 5.0/4.0)
-        
-        // Use 0 for scale to automatically match device screen scale (2x/3x for Retina)
-        UIGraphicsBeginImageContextWithOptions(targetSize, true, 0)
-        defer { UIGraphicsEndImageContext() }
-        
-        guard let context = UIGraphicsGetCurrentContext() else { return image }
-        
-        // Fill background
-        context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-        context.fill(CGRect(origin: .zero, size: targetSize))
-        
-        // Flip coordinate system to match UIKit (fix upside-down images)
-        context.translateBy(x: 0, y: targetSize.height)
-        context.scaleBy(x: 1.0, y: -1.0)
-        
-        // Apply transformations
-        context.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
-        context.rotate(by: transform.rotation)
-        context.translateBy(x: transform.offsetX * targetSize.width, y: transform.offsetY * targetSize.height)
-        context.scaleBy(x: transform.scale, y: transform.scale)
-        
-        // Draw image centered
-        let drawRect = CGRect(
-            x: -targetSize.width / 2,
-            y: -targetSize.height / 2,
-            width: targetSize.width,
-            height: targetSize.height
-        )
-        
-        if let cgImage = image.cgImage {
-            context.draw(cgImage, in: drawRect)
-        }
-        
-        return UIGraphicsGetImageFromCurrentImageContext() ?? image
     }
 }
 
@@ -898,25 +859,29 @@ actor VideoExporter {
         
         // Write frames
         for photo in photos {
-            // Load image downsampled to target resolution
-            guard let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: resolution) else {
+            // Always load from assetLocalId for display (already transformed)
+            guard let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 2400, height: 2400)) else {
                 continue
             }
-            
+
+            // assetLocalId already contains the transformed image
+            // Just resize to target resolution if needed
+            let transformedImage = image
+
             // Render this image for the required number of frames
             for _ in 0..<framesPerPhoto {
                 while !videoInput.isReadyForMoreMediaData {
                     try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
                 }
-                
+
                 let presentationTime = CMTime(value: Int64(frameCount), timescale: Int32(fps))
-                
-                if let pixelBuffer = createPixelBuffer(from: image, size: resolution) {
+
+                if let pixelBuffer = createPixelBuffer(from: transformedImage, size: resolution) {
                     adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
                 }
-                
+
                 frameCount += 1
-                
+
                 // Update progress
                 let progress = Double(frameCount) / Double(totalFrames)
                 progressCallback(progress)
@@ -928,7 +893,9 @@ actor VideoExporter {
         
         return videoWriter.status == .completed ? outputURL : nil
     }
-    
+
+    // Removed - now using TransformRenderer.renderTransformedImage
+
     private static func createPixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
         let attrs = [
             kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue!,

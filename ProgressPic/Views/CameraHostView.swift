@@ -593,11 +593,17 @@ struct CameraHostView: View {
         }
         
         if useFirst, let first = photos.first {
-            lastGhost = await PhotoStore.fetchUIImage(localId: first.assetLocalId, targetSize: targetSize)
-            print("👻 Loaded first photo as ghost")
+            // Always load from assetLocalId for display (already transformed)
+            if let image = await PhotoStore.fetchUIImage(localId: first.assetLocalId, targetSize: targetSize) {
+                lastGhost = image
+                print("👻 Loaded first photo as ghost")
+            }
         } else if let last = photos.last {
-            lastGhost = await PhotoStore.fetchUIImage(localId: last.assetLocalId, targetSize: targetSize)
-            print("👻 Loaded last photo as ghost")
+            // Always load from assetLocalId for display (already transformed)
+            if let image = await PhotoStore.fetchUIImage(localId: last.assetLocalId, targetSize: targetSize) {
+                lastGhost = image
+                print("👻 Loaded last photo as ghost")
+            }
         } else {
             lastGhost = nil
             print("👻 No photos available for ghost")
@@ -606,6 +612,7 @@ struct CameraHostView: View {
     
     func loadLatestThumbnail() async {
         if let latest = photos.last {
+            // Always load from assetLocalId for display (already transformed)
             latestPhotoThumbnail = await PhotoStore.fetchUIImage(localId: latest.assetLocalId, targetSize: CGSize(width: 100, height: 100))
         } else {
             latestPhotoThumbnail = nil

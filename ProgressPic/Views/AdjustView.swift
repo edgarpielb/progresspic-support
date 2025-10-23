@@ -29,44 +29,40 @@ struct AdjustView: View {
                     let cropH = cropW * 5/4
 
                     ZStack {
-                        // Single transformed image for entire view
-                        Image(uiImage: captured)
-                            .resizable()
-                            .scaledToFit()
-                            .scaleEffect(scale)
-                            .offset(offset)
-                            .rotationEffect(rotation)
+                        // Background dimming
+                        Rectangle()
+                            .fill(Color.black.opacity(0.7))
                             .frame(width: geo.size.width, height: geo.size.height)
-                            .opacity(showGhost ? (1 - opacity) : 1)
-                            .overlay(
-                                // Dimming overlay everywhere EXCEPT the crop area
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.7))
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .mask(
-                                        ZStack {
-                                            Rectangle()
-                                                .fill(Color.white)
-                                            Rectangle()
-                                                .fill(Color.black)
-                                                .frame(width: cropW, height: cropH)
-                                                .position(x: geo.size.width/2, y: geo.size.height/2)
-                                                .blendMode(.destinationOut)
-                                        }
-                                        .compositingGroup()
-                                    )
-                                    .allowsHitTesting(false)
-                            )
 
-                        // Ghost overlay (if enabled)
-                        if showGhost, let g = ghost {
-                            Image(uiImage: g)
+                        // Crop window with clipped content
+                        ZStack {
+                            // Background for crop area
+                            Rectangle()
+                                .fill(Color.black)
+
+                            // Transformed image fitted to crop area (not full screen)
+                            Image(uiImage: captured)
                                 .resizable()
                                 .scaledToFit()
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .opacity(opacity)
-                                .allowsHitTesting(false)
+                                .frame(width: cropW, height: cropH)
+                                .scaleEffect(scale)
+                                .offset(offset)
+                                .rotationEffect(rotation)
+                                .opacity(showGhost ? (1 - opacity) : 1)
+
+                            // Ghost overlay (if enabled) - also fitted to crop area
+                            if showGhost, let g = ghost {
+                                Image(uiImage: g)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: cropW, height: cropH)
+                                    .opacity(opacity)
+                                    .allowsHitTesting(false)
+                            }
                         }
+                        .frame(width: cropW, height: cropH)
+                        .clipped() // Clip to crop boundaries
+                        .position(x: geo.size.width/2, y: geo.size.height/2)
                         
                         // Border on crop area
                         Rectangle()
@@ -91,7 +87,9 @@ struct AdjustView: View {
                             MagnificationGesture()
                                 .onChanged { value in
                                     let newScale = lastScale * value
-                                    scale = max(minScale, newScale)
+                                    // Allow zooming out to 50% of the fill scale for more flexibility
+                                    let absoluteMinScale = minScale * 0.5
+                                    scale = max(absoluteMinScale, min(newScale, 10.0))
                                 }
                                 .onEnded { _ in
                                     lastScale = scale
@@ -301,30 +299,18 @@ struct AdjustView: View {
 
     // Render to strict 4:5 based on current transform
     func makeCroppedImage() -> UIImage {
-        let outW: CGFloat = 1200   // 4:5 canvas (optimized for memory)
-        let outH: CGFloat = 1500
-        let canvas = CGSize(width: outW, height: outH)
-
-        let baseScale = min(outW / captured.size.width, outH / captured.size.height)
-        let finalScale = baseScale * max(scale, 0.001)
-
-        let renderer = UIGraphicsImageRenderer(size: canvas)
-        return renderer.image { ctx in
-            UIColor.black.setFill()
-            ctx.fill(CGRect(origin: .zero, size: canvas))
-
-            ctx.cgContext.translateBy(x: outW/2 + offset.width * baseScale, y: outH/2 + offset.height * baseScale)
-            ctx.cgContext.rotate(by: rotation.radians)
-            ctx.cgContext.scaleBy(x: finalScale, y: finalScale)
-
-            let drawRect = CGRect(
-                x: -captured.size.width/2,
-                y: -captured.size.height/2,
-                width: captured.size.width,
-                height: captured.size.height
-            )
-            captured.draw(in: drawRect)
-        }
+        // Use centralized renderer for consistency
+        let transform = AlignTransform(
+            scale: scale,
+            offsetX: offset.width,
+            offsetY: offset.height,
+            rotation: rotation.radians
+        )
+        return TransformRenderer.renderTransformedImage(
+            sourceImage: captured,
+            transform: transform,
+            targetSize: CGSize(width: 1200, height: 1500)
+        )
     }
 
     func save() async {
