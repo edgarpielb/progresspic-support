@@ -976,13 +976,25 @@ struct PhotoAdjustSheet: View {
             }
             
             guard let selectedGhostPhoto = ghostPhoto else { return }
-            
-            if let loadedGhost = await PhotoStore.fetchUIImage(localId: selectedGhostPhoto.assetLocalId, targetSize: nil) {
+
+            // Load original uncropped image if available, otherwise use the transformed version
+            let ghostImageId = selectedGhostPhoto.originalAssetLocalId ?? selectedGhostPhoto.assetLocalId
+            let needsTransform = selectedGhostPhoto.originalAssetLocalId != nil
+
+            print("👻 Loading ghost from: \(needsTransform ? "ORIGINAL (will apply transform)" : "transformed (already cropped)")")
+
+            if let loadedGhost = await PhotoStore.fetchUIImage(localId: ghostImageId, targetSize: nil) {
                 await MainActor.run {
-                    // Render the ghost with its transform as a 4:5 cropped image (same as main display)
-                    let croppedGhost = renderCroppedGhostImage(from: loadedGhost, transform: selectedGhostPhoto.alignTransform)
-                    self.ghostImage = croppedGhost
-                    print("👻 Ghost image loaded and cropped successfully")
+                    if needsTransform {
+                        // Render the ghost with its transform as a 4:5 cropped image (same as main display)
+                        let croppedGhost = renderCroppedGhostImage(from: loadedGhost, transform: selectedGhostPhoto.alignTransform)
+                        self.ghostImage = croppedGhost
+                        print("👻 Ghost image loaded from original and transformed successfully")
+                    } else {
+                        // Already transformed, use as-is
+                        self.ghostImage = loadedGhost
+                        print("👻 Ghost image loaded from pre-transformed version")
+                    }
                 }
             } else {
                 print("❌ Failed to load ghost image")
