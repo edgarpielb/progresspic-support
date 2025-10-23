@@ -314,7 +314,8 @@ struct JourneyDetailView: View {
                     PhotosPicker(
                         selection: $selectedPhotoItems,
                         maxSelectionCount: 20,
-                        matching: .images
+                        matching: .images,
+                        photoLibrary: .shared()
                     ) {
                         HStack(spacing: 12) {
                             Image(systemName: "photo.badge.plus")
@@ -522,18 +523,30 @@ struct JourneyDetailView: View {
                     continue
                 }
 
-                // Get creation date from metadata if available
+                // Get creation date from EXIF metadata if available
                 var creationDate = Date()
-                if let assetIdentifier = item.itemIdentifier {
+
+                // First try: Extract EXIF date directly from image data
+                if let exifDate = PhotoStore.extractEXIFDate(from: imageData) {
+                    creationDate = exifDate
+                    print("✅ Extracted EXIF date from image data: \(exifDate.formatted())")
+                }
+                // Second try: Use PHAsset for EXIF extraction if identifier available
+                else if let assetIdentifier = item.itemIdentifier {
                     let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
-                    if let asset = fetchResult.firstObject, let originalDate = asset.creationDate {
-                        creationDate = originalDate
-                        print("📅 Using original photo date: \(originalDate.formatted())")
+                    if let asset = fetchResult.firstObject {
+                        // Use our EXIF extraction method instead of asset.creationDate
+                        if let exifDate = await PhotoStore.getEXIFCreationDate(from: asset) {
+                            creationDate = exifDate
+                            print("✅ Extracted EXIF date from PHAsset: \(exifDate.formatted())")
+                        } else {
+                            print("⚠️ Could not extract EXIF date for photo \(index + 1), using current date")
+                        }
                     } else {
-                        print("⚠️ Could not retrieve original date for photo \(index + 1), using current date")
+                        print("⚠️ Could not fetch PHAsset for photo \(index + 1), using current date")
                     }
                 } else {
-                    print("⚠️ No asset identifier for photo \(index + 1), using current date")
+                    print("⚠️ No asset identifier for photo \(index + 1) and no EXIF data, using current date")
                 }
 
                 // Downscale large images to reduce memory usage (max 3000px on longest side)

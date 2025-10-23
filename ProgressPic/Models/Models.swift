@@ -263,10 +263,16 @@ struct UserProfile: Codable {
     var heightCm: Double?
     var gender: Gender?
     var preferredUnit: MeasureUnit?
-    
+    var colorScheme: ColorScheme?
+
     enum Gender: String, Codable, CaseIterable {
         case male = "Male"
         case female = "Female"
+    }
+
+    enum ColorScheme: String, Codable, CaseIterable {
+        case cyan = "Cyan"
+        case pink = "Pink"
     }
     
     var age: Int? {

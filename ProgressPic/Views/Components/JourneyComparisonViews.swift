@@ -7,6 +7,9 @@ struct JourneyCompareSheet: View {
     let journey: Journey
     let photos: [ProgressPhoto]
     @Environment(\.dismiss) private var dismiss
+    @State private var shareImage: UIImage?
+    @State private var shareURL: URL?
+    @State private var showShareSheet = false
 
     var body: some View {
         NavigationView {
@@ -14,22 +17,49 @@ struct JourneyCompareSheet: View {
                 Color(red: 30/255, green: 32/255, blue: 35/255)
                     .ignoresSafeArea()
 
-                JourneyCompareView(journey: journey, photos: photos)
+                JourneyCompareView(journey: journey, photos: photos, shareImage: $shareImage)
             }
             .navigationTitle("Compare Photos")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: {
+                        prepareShareImage()
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(.white)
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.pink)
+                            .foregroundColor(AppStyle.Colors.accentPrimary)
                     }
                 }
             }
+            .sheet(item: $shareURL) { url in
+                ShareSheet(url: url)
+            }
+        }
+    }
+    
+    private func prepareShareImage() {
+        guard let image = shareImage else { return }
+        
+        // Save image to temporary directory
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = "comparison_\(Date().timeIntervalSince1970).jpg"
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        
+        if let imageData = image.jpegData(compressionQuality: 0.9) {
+            try? imageData.write(to: fileURL)
+            shareURL = fileURL
+            showShareSheet = true
         }
     }
 }
@@ -38,6 +68,7 @@ struct JourneyCompareSheet: View {
 struct JourneyCompareView: View {
     let journey: Journey
     let photos: [ProgressPhoto]
+    @Binding var shareImage: UIImage?
     @State private var left: ProgressPhoto?
     @State private var right: ProgressPhoto?
     @State private var mode: CompareMode = .parallel
@@ -46,6 +77,15 @@ struct JourneyCompareView: View {
     @State private var selectedSide: SelectionSide = .left
     @State private var showTooltip = false
     @State private var sliderPosition: CGFloat = 0.5
+    
+    // Date overlay settings
+    @State private var dateFormat: DateFormat = .classic
+    @State private var datePosition: DatePosition = .topLeft
+    @State private var dateFont: DateFont = .system
+    @State private var dateFontSize: DateFontSize = .medium
+    @State private var dateColor: Color = .white
+    @State private var showDateBackground = true
+    @State private var showDateSheet = false
     
     enum CompareMode: String, CaseIterable {
         case parallel = "Parallel"
@@ -104,373 +144,761 @@ struct JourneyCompareView: View {
     }
     
     var body: some View {
+        contentWithModifiers
+    }
+
+    @ViewBuilder
+    private var contentWithModifiers: some View {
+        mainContent
+            .ignoresSafeArea(edges: .bottom)
+            .sheet(isPresented: $showDateSheet, content: {
+                dateSheet
+            })
+            .modifier(PhotoChangeModifier(
+                left: left,
+                right: right,
+                mode: mode,
+                fitImage: fitImage,
+                showDates: showDates,
+                dateFormat: dateFormat,
+                datePosition: datePosition,
+                dateFont: dateFont,
+                dateFontSize: dateFontSize,
+                dateColor: dateColor,
+                showDateBackground: showDateBackground,
+                onCapture: captureComparisonImage
+            ))
+            .onAppear {
+                if left == nil && right == nil && visiblePhotos.count >= 2 {
+                    left = visiblePhotos.last
+                    right = visiblePhotos.first
+                }
+            }
+    }
+
+    private var mainContent: some View {
         ScrollView {
             VStack(spacing: 0) {
                 Spacer().frame(height: 8)
 
                 if visiblePhotos.count >= 2 {
-                        // Use standard Picker for better responsiveness
-                        Picker("Mode", selection: $mode) {
-                            Text("Parallel").tag(CompareMode.parallel)
-                            Text("Slider").tag(CompareMode.slider)
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal)
+                    modePicker
+                    Spacer().frame(height: AppStyle.Spacing.sm)
 
-                        Spacer().frame(height: AppStyle.Spacing.sm)
-                
-                // Action buttons ABOVE comparison
-                if left != nil && right != nil {
-                    HStack(spacing: AppStyle.Spacing.xl) {
-                        // Dates toggle
-                        Button(action: {
-                            showDates.toggle()
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: showDates ? "calendar.badge.checkmark" : "calendar")
-                                    .font(.system(size: AppStyle.IconSize.xl))
-                                    .foregroundColor(showDates ? .pink : AppStyle.Colors.textPrimary)
-                                Text("Dates")
-                                    .font(AppStyle.FontStyle.caption)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                            }
-                            .frame(width: 70)
-                        }
-                        
-                        // Fit Image toggle
-                        Button(action: {
-                            fitImage.toggle()
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: fitImage ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
-                                    .font(.system(size: AppStyle.IconSize.xl))
-                                    .foregroundColor(fitImage ? .pink : AppStyle.Colors.textPrimary)
-                                Text("Fit Image")
-                                    .font(AppStyle.FontStyle.caption)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                            }
-                            .frame(width: 70)
-                        }
-                        
-                        // Flip action
-                        Button(action: flipPhotos) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "arrow.left.arrow.right")
-                                    .font(.system(size: AppStyle.IconSize.xl))
-                                    .foregroundColor(AppStyle.Colors.textPrimary)
-                                Text("Flip")
-                                    .font(AppStyle.FontStyle.caption)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                            }
-                            .frame(width: 70)
-                        }
+                    if left != nil && right != nil {
+                        actionButtons
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, AppStyle.Spacing.sm)
-                }
-                
-                // Main comparison view - full width with 4:5 ratio
-                if let left = left, let right = right {
-                    GeometryReader { geometry in
-                        let availableWidth = geometry.size.width
-                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
 
-                        ZStack {
-                            ImprovedCompareCanvas(
-                                left: left,
-                                right: right,
-                                mode: mode,
-                                showDates: showDates,
-                                fitImage: fitImage,
-                                sliderPosition: $sliderPosition
-                            )
-                            .frame(width: availableWidth, height: canvasHeight)
-                            .background(
-                                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                                    .fill(AppStyle.Colors.panel)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                                    .stroke(AppStyle.Colors.border, lineWidth: 1)
-                            )
-                        
-                        // Tap areas to select which side to replace
-                        // In slider mode, tap areas avoid the slider zone
-                        if mode == .parallel {
-                            // Parallel mode: full tap areas for each half
-                            HStack(spacing: 0) {
-                                // Left tap area
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        selectSide(.left)
-                                    }
-                                .overlay(
-                                    VStack {
-                                        Spacer()
-                                        if selectedSide == .left && showTooltip {
-                                            VStack(spacing: 4) {
-                                                ZStack {
-                                                    Circle()
-                                                        .fill(.pink)
-                                                        .frame(width: 40, height: 40)
-                                                        .shadow(radius: 4)
+                    comparisonView
 
-                                                    Text("L")
-                                                        .font(.system(size: 20, weight: .bold))
-                                                        .foregroundColor(.white)
-                                                }
-
-                                                Text("Tap an image\nbelow to replace")
-                                                    .font(AppStyle.FontStyle.caption)
-                                                    .multilineTextAlignment(.center)
-                                                    .foregroundColor(.white)
-                                                    .padding(.horizontal, 12)
-                                                    .padding(.vertical, 8)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: 8)
-                                                            .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                    )
-                                                    .transition(.opacity)
-                                            }
-                                            .padding(.bottom, showDates ? 32 : 12)
-                                        }
-                                    }
-                                )
-
-                                // Right tap area
-                                Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selectSide(.right)
-                                }
-                                .overlay(
-                                    VStack {
-                                        Spacer()
-                                        if selectedSide == .right && showTooltip {
-                                            VStack(spacing: 4) {
-                                                ZStack {
-                                                    Circle()
-                                                        .fill(.pink)
-                                                        .frame(width: 40, height: 40)
-                                                        .shadow(radius: 4)
-
-                                                    Text("R")
-                                                        .font(.system(size: 20, weight: .bold))
-                                                        .foregroundColor(.white)
-                                                }
-
-                                                Text("Tap an image\nbelow to replace")
-                                                    .font(AppStyle.FontStyle.caption)
-                                                    .multilineTextAlignment(.center)
-                                                    .foregroundColor(.white)
-                                                    .padding(.horizontal, 12)
-                                                    .padding(.vertical, 8)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: 8)
-                                                            .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                    )
-                                                    .transition(.opacity)
-                                            }
-                                            .padding(.bottom, showDates ? 32 : 12)
-                                        }
-                                    }
-                                )
-                            }
-                        } else {
-                            // Slider mode: tap areas that avoid the 60pt slider zone
-                            GeometryReader { tapGeo in
-                                let sliderX = tapGeo.size.width * sliderPosition
-                                let sliderZone: CGFloat = 60
-
-                                HStack(spacing: 0) {
-                                    // Left tap area (only if far enough from slider)
-                                    if sliderX > sliderZone / 2 {
-                                        Color.clear
-                                            .frame(width: sliderX - sliderZone / 2)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                selectSide(.left)
-                                            }
-                                            .overlay(
-                                                VStack {
-                                                    Spacer()
-                                                    if selectedSide == .left && showTooltip {
-                                                        VStack(spacing: 4) {
-                                                            ZStack {
-                                                                Circle()
-                                                                    .fill(.pink)
-                                                                    .frame(width: 40, height: 40)
-                                                                    .shadow(radius: 4)
-
-                                                                Text("L")
-                                                                    .font(.system(size: 20, weight: .bold))
-                                                                    .foregroundColor(.white)
-                                                            }
-
-                                                            Text("Tap an image\nbelow to replace")
-                                                                .font(AppStyle.FontStyle.caption)
-                                                                .multilineTextAlignment(.center)
-                                                                .foregroundColor(.white)
-                                                                .padding(.horizontal, 12)
-                                                                .padding(.vertical, 8)
-                                                                .background(
-                                                                    RoundedRectangle(cornerRadius: 8)
-                                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                                )
-                                                                .transition(.opacity)
-                                                        }
-                                                        .padding(.bottom, showDates ? 32 : 12)
-                                                    }
-                                                }
-                                            )
-                                    }
-
-                                    // Slider zone - no interaction
-                                    Color.clear
-                                        .frame(width: sliderZone)
-
-                                    // Right tap area (only if far enough from slider)
-                                    if (tapGeo.size.width - sliderX) > sliderZone / 2 {
-                                        Color.clear
-                                            .frame(width: tapGeo.size.width - sliderX - sliderZone / 2)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                selectSide(.right)
-                                            }
-                                            .overlay(
-                                                VStack {
-                                                    Spacer()
-                                                    if selectedSide == .right && showTooltip {
-                                                        VStack(spacing: 4) {
-                                                            ZStack {
-                                                                Circle()
-                                                                    .fill(.pink)
-                                                                    .frame(width: 40, height: 40)
-                                                                    .shadow(radius: 4)
-
-                                                                Text("R")
-                                                                    .font(.system(size: 20, weight: .bold))
-                                                                    .foregroundColor(.white)
-                                                            }
-
-                                                            Text("Tap an image\nbelow to replace")
-                                                                .font(AppStyle.FontStyle.caption)
-                                                                .multilineTextAlignment(.center)
-                                                                .foregroundColor(.white)
-                                                                .padding(.horizontal, 12)
-                                                                .padding(.vertical, 8)
-                                                                .background(
-                                                                    RoundedRectangle(cornerRadius: 8)
-                                                                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
-                                                                )
-                                                                .transition(.opacity)
-                                                        }
-                                                        .padding(.bottom, showDates ? 32 : 12)
-                                                    }
-                                                }
-                                            )
-                                    }
-                                }
-                            }
-                        }
+                    if !visiblePhotos.isEmpty {
+                        photoSelector
                     }
-                    }
-                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0) // Reserve space for GeometryReader with 4:5 ratio
                 } else {
-                    // Empty state
-                    GeometryReader { geometry in
-                        let availableWidth = geometry.size.width
-                        let canvasHeight = availableWidth * 5.0 / 4.0 // 4:5 aspect ratio
-                        
-                        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
-                            .fill(AppStyle.Colors.panel)
-                            .frame(width: availableWidth, height: canvasHeight)
-                            .overlay(
-                                Text("Select two photos to compare")
-                                    .font(AppStyle.FontStyle.body)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                            )
-                    }
-                    .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
+                    emptyPhotosState
                 }
+            }
+        }
+    }
 
-                // Single photo slider - always show if we have visible photos
-                if !visiblePhotos.isEmpty {
-                    Spacer().frame(height: AppStyle.Spacing.lg)
+    private var dateSheet: some View {
+        DateSettingsSheet(
+            showDateOverlay: $showDates,
+            dateFormat: $dateFormat,
+            datePosition: $datePosition,
+            dateFont: $dateFont,
+            dateFontSize: $dateFontSize,
+            dateColor: $dateColor,
+            showDateBackground: $showDateBackground
+        )
+    }
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(visiblePhotos) { photo in
-                                Button(action: {
-                                    selectPhoto(photo)
-                                }) {
-                                    ZStack(alignment: .topLeading) {
-                                        PhotoGridItem(photo: photo)
-                                            .frame(width: 120, height: 150)
+    // MARK: - View Components
 
-                                        // Selection indicators
-                                        VStack(spacing: 4) {
-                                            if self.left?.id == photo.id {
-                                                Circle()
-                                                    .fill(AppStyle.Colors.accentRed)
-                                                    .frame(width: 28, height: 28)
-                                                    .overlay(
-                                                        Text("L")
-                                                            .font(.system(size: 14, weight: .bold))
-                                                            .foregroundColor(.white)
-                                                    )
-                                            }
-                                            if self.right?.id == photo.id {
-                                                Circle()
-                                                    .fill(AppStyle.Colors.accentRed)
-                                                    .frame(width: 28, height: 28)
-                                                    .overlay(
-                                                        Text("R")
-                                                            .font(.system(size: 14, weight: .bold))
-                                                            .foregroundColor(.white)
-                                                    )
-                                            }
-                                        }
-                                        .padding(8)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    .padding(.bottom, AppStyle.Spacing.lg)
+    private var modePicker: some View {
+        Picker("Mode", selection: $mode) {
+            Text("Parallel").tag(CompareMode.parallel)
+            Text("Slider").tag(CompareMode.slider)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: AppStyle.Spacing.xl) {
+            Button(action: {
+                showDates = true
+                showDateSheet = true
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                        .foregroundColor(showDates ? AppStyle.Colors.accentPrimary : AppStyle.Colors.textPrimary)
+                    Text("Dates")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
                 }
-                } else {
-                    // No photos state
+                .frame(width: 70)
+            }
+
+            Button(action: {
+                fitImage.toggle()
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: fitImage ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                        .foregroundColor(fitImage ? AppStyle.Colors.accentPrimary : AppStyle.Colors.textPrimary)
+                    Text("Fit Image")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                }
+                .frame(width: 70)
+            }
+
+            Button(action: flipPhotos) {
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: AppStyle.IconSize.xl))
+                        .foregroundColor(AppStyle.Colors.textPrimary)
+                    Text("Flip")
+                        .font(AppStyle.FontStyle.caption)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                }
+                .frame(width: 70)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, AppStyle.Spacing.sm)
+    }
+
+    private var comparisonView: some View {
+        Group {
+            if let left = left, let right = right {
+                comparisonCanvas(left: left, right: right)
+            } else {
+                emptyComparisonState
+            }
+        }
+    }
+
+    private func comparisonCanvas(left: ProgressPhoto, right: ProgressPhoto) -> some View {
+        GeometryReader { geometry in
+            let availableWidth = geometry.size.width
+            let canvasHeight = availableWidth * 5.0 / 4.0
+
+            ZStack {
+                ImprovedCompareCanvas(
+                    left: left,
+                    right: right,
+                    mode: mode,
+                    showDates: showDates,
+                    fitImage: fitImage,
+                    sliderPosition: $sliderPosition,
+                    dateFormat: dateFormat,
+                    datePosition: datePosition,
+                    dateFont: dateFont,
+                    dateFontSize: dateFontSize,
+                    dateColor: dateColor,
+                    showDateBackground: showDateBackground
+                )
+                .frame(width: availableWidth, height: canvasHeight)
+                .background(
                     RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
                         .fill(AppStyle.Colors.panel)
-                        .frame(height: 200)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                        .stroke(AppStyle.Colors.border, lineWidth: 1)
+                )
+
+                tapAreas
+            }
+        }
+        .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
+    }
+
+    private var emptyComparisonState: some View {
+        GeometryReader { geometry in
+            let availableWidth = geometry.size.width
+            let canvasHeight = availableWidth * 5.0 / 4.0
+
+            RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+                .fill(AppStyle.Colors.panel)
+                .frame(width: availableWidth, height: canvasHeight)
+                .overlay(
+                    Text("Select two photos to compare")
+                        .font(AppStyle.FontStyle.body)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                )
+        }
+        .frame(height: UIScreen.main.bounds.width * 5.0 / 4.0)
+    }
+
+    private var tapAreas: some View {
+        Group {
+            if mode == .parallel {
+                parallelTapAreas
+            } else {
+                sliderTapAreas
+            }
+        }
+    }
+
+    private var parallelTapAreas: some View {
+        HStack(spacing: 0) {
+            tapArea(side: .left)
+            tapArea(side: .right)
+        }
+    }
+
+    private func tapArea(side: SelectionSide) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectSide(side)
+            }
+            .overlay(
+                VStack {
+                    Spacer()
+                    if selectedSide == side && showTooltip {
+                        tooltipView(side: side)
+                    }
+                }
+            )
+    }
+
+    private func tooltipView(side: SelectionSide) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(AppStyle.Colors.accentPrimary)
+                    .frame(width: 40, height: 40)
+                    .shadow(radius: 4)
+
+                Text(side == .left ? "L" : "R")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+            }
+
+            Text("Tap an image\nbelow to replace")
+                .font(AppStyle.FontStyle.caption)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(AppStyle.Colors.bgDark.opacity(0.9))
+                )
+                .transition(.opacity)
+        }
+        .padding(.bottom, showDates ? 32 : 12)
+    }
+
+    private var sliderTapAreas: some View {
+        GeometryReader { tapGeo in
+            let sliderX = tapGeo.size.width * sliderPosition
+            let sliderZone: CGFloat = 60
+
+            HStack(spacing: 0) {
+                if sliderX > sliderZone / 2 {
+                    Color.clear
+                        .frame(width: sliderX - sliderZone / 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectSide(.left)
+                        }
                         .overlay(
-                            VStack(spacing: 8) {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.title2)
-                                    .foregroundColor(AppStyle.Colors.textTertiary)
-                                Text("Add at least 2 photos to compare")
-                                    .font(AppStyle.FontStyle.body)
-                                    .foregroundColor(AppStyle.Colors.textSecondary)
-                                    .multilineTextAlignment(.center)
+                            VStack {
+                                Spacer()
+                                if selectedSide == .left && showTooltip {
+                                    tooltipView(side: .left)
+                                }
                             }
                         )
-                        .padding(.horizontal)
-                        .padding(.top, 60)
+                }
+
+                Color.clear.frame(width: sliderZone)
+
+                if (tapGeo.size.width - sliderX) > sliderZone / 2 {
+                    Color.clear
+                        .frame(width: tapGeo.size.width - sliderX - sliderZone / 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectSide(.right)
+                        }
+                        .overlay(
+                            VStack {
+                                Spacer()
+                                if selectedSide == .right && showTooltip {
+                                    tooltipView(side: .right)
+                                }
+                            }
+                        )
                 }
             }
         }
-        .ignoresSafeArea(edges: .bottom)
-        .onAppear {
-            // Auto-select oldest (before) and newest (after) visible photos
-            if left == nil && right == nil && visiblePhotos.count >= 2 {
-                left = visiblePhotos.last  // Oldest photo (Picture 1)
-                right = visiblePhotos.first  // Newest photo (Picture 2)
+    }
+
+    private var photoSelector: some View {
+        VStack(spacing: 0) {
+            Spacer().frame(height: AppStyle.Spacing.lg)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(visiblePhotos) { photo in
+                        Button(action: {
+                            selectPhoto(photo)
+                        }) {
+                            ZStack(alignment: .topLeading) {
+                                PhotoGridItem(photo: photo)
+                                    .frame(width: 120, height: 150)
+
+                                VStack(spacing: 4) {
+                                    if self.left?.id == photo.id {
+                                        selectionIndicator(label: "L")
+                                    }
+                                    if self.right?.id == photo.id {
+                                        selectionIndicator(label: "R")
+                                    }
+                                }
+                                .padding(8)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .padding(.bottom, AppStyle.Spacing.lg)
+        }
+    }
+
+    private func selectionIndicator(label: String) -> some View {
+        Circle()
+            .fill(AppStyle.Colors.accentPrimary)
+            .frame(width: 28, height: 28)
+            .overlay(
+                Text(label)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+            )
+    }
+
+    private var emptyPhotosState: some View {
+        RoundedRectangle(cornerRadius: AppStyle.Corner.xl)
+            .fill(AppStyle.Colors.panel)
+            .frame(height: 200)
+            .overlay(
+                VStack(spacing: 8) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.title2)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
+                    Text("Add at least 2 photos to compare")
+                        .font(AppStyle.FontStyle.body)
+                        .foregroundColor(AppStyle.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+            )
+            .padding(.horizontal)
+            .padding(.top, 60)
+    }
+    
+    private func captureComparisonImage() {
+        guard let leftPhoto = left, let rightPhoto = right else { return }
+        
+        Task {
+            // Load images at screen resolution
+            let screenWidth = UIScreen.main.bounds.width
+            let targetSize = CGSize(width: screenWidth * UIScreen.main.scale, height: screenWidth * UIScreen.main.scale * 5.0 / 4.0)
+            
+            guard let leftImg = await PhotoStore.fetchUIImage(localId: leftPhoto.assetLocalId, targetSize: targetSize),
+                  let rightImg = await PhotoStore.fetchUIImage(localId: rightPhoto.assetLocalId, targetSize: targetSize) else {
+                return
+            }
+            
+            // Render the comparison image
+            let image = await renderComparisonImage(leftImg: leftImg, rightImg: rightImg, size: targetSize)
+            
+            await MainActor.run {
+                shareImage = image
             }
         }
+    }
+    
+    private func renderComparisonImage(leftImg: UIImage, rightImg: UIImage, size: CGSize) async -> UIImage? {
+        // Capture state values on main actor before entering detached task
+        let currentMode = mode
+        let shouldFitImage = fitImage
+        let shouldShowDates = showDates
+        let leftDate = left?.date ?? Date()
+        let rightDate = right?.date ?? Date()
+        let currentDateFormat = dateFormat
+        let currentDateFontSize = dateFontSize
+        let currentDateColor = dateColor
+        let currentDatePosition = datePosition
+        let shouldShowDateBackground = showDateBackground
+        let currentSliderPos = sliderPosition
+
+        return await Task.detached {
+            UIGraphicsBeginImageContextWithOptions(size, true, 1.0)
+            defer { UIGraphicsEndImageContext() }
+
+            guard let context = UIGraphicsGetCurrentContext() else { return nil }
+
+            // Fill background
+            context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+            context.fill(CGRect(origin: .zero, size: size))
+            
+            // Flip coordinate system to fix upside-down images
+            context.translateBy(x: 0, y: size.height)
+            context.scaleBy(x: 1.0, y: -1.0)
+
+            if currentMode == .parallel {
+                // Draw parallel view
+                let halfWidth = size.width / 2
+
+                // Draw left image
+                if let leftCGImage = leftImg.cgImage {
+                    context.saveGState()
+                    let leftClip = CGRect(x: 0, y: 0, width: halfWidth, height: size.height)
+                    context.clip(to: leftClip)
+                    
+                    let drawRect: CGRect
+                    if shouldFitImage {
+                        // Fit mode - show entire image
+                        let imageAspect = CGFloat(leftCGImage.width) / CGFloat(leftCGImage.height)
+                        let targetAspect = halfWidth / size.height
+                        if imageAspect > targetAspect {
+                            let drawHeight = halfWidth / imageAspect
+                            drawRect = CGRect(x: 0, y: (size.height - drawHeight) / 2, width: halfWidth, height: drawHeight)
+                        } else {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: (halfWidth - drawWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        }
+                    } else {
+                        // Fill mode - crop to fill entire area
+                        let imageAspect = CGFloat(leftCGImage.width) / CGFloat(leftCGImage.height)
+                        let targetAspect = halfWidth / size.height
+                        if imageAspect > targetAspect {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: -(drawWidth - halfWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        } else {
+                            let drawHeight = halfWidth / imageAspect
+                            drawRect = CGRect(x: 0, y: -(drawHeight - size.height) / 2, width: halfWidth, height: drawHeight)
+                        }
+                    }
+                    context.draw(leftCGImage, in: drawRect)
+                    context.restoreGState()
+                }
+
+                // Draw right image
+                if let rightCGImage = rightImg.cgImage {
+                    context.saveGState()
+                    let rightClip = CGRect(x: halfWidth, y: 0, width: halfWidth, height: size.height)
+                    context.clip(to: rightClip)
+                    
+                    let drawRect: CGRect
+                    if shouldFitImage {
+                        // Fit mode - show entire image
+                        let imageAspect = CGFloat(rightCGImage.width) / CGFloat(rightCGImage.height)
+                        let targetAspect = halfWidth / size.height
+                        if imageAspect > targetAspect {
+                            let drawHeight = halfWidth / imageAspect
+                            drawRect = CGRect(x: halfWidth, y: (size.height - drawHeight) / 2, width: halfWidth, height: drawHeight)
+                        } else {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: halfWidth + (halfWidth - drawWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        }
+                    } else {
+                        // Fill mode - crop to fill entire area
+                        let imageAspect = CGFloat(rightCGImage.width) / CGFloat(rightCGImage.height)
+                        let targetAspect = halfWidth / size.height
+                        if imageAspect > targetAspect {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: halfWidth - (drawWidth - halfWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        } else {
+                            let drawHeight = halfWidth / imageAspect
+                            drawRect = CGRect(x: halfWidth, y: -(drawHeight - size.height) / 2, width: halfWidth, height: drawHeight)
+                        }
+                    }
+                    context.draw(rightCGImage, in: drawRect)
+                    context.restoreGState()
+                }
+
+                // Draw white divider line
+                context.setFillColor(UIColor.white.cgColor)
+                context.fill(CGRect(x: halfWidth - 0.5, y: 0, width: 1, height: size.height))
+            } else {
+                // Slider mode
+                let dividerX = size.width * currentSliderPos
+                
+                // Draw RIGHT image (visible on LEFT side of slider - before divider)
+                if let rightCGImage = rightImg.cgImage {
+                    context.saveGState()
+                    let leftClip = CGRect(x: 0, y: 0, width: dividerX, height: size.height)
+                    context.clip(to: leftClip)
+                    
+                    let drawRect: CGRect
+                    if shouldFitImage {
+                        let imageAspect = CGFloat(rightCGImage.width) / CGFloat(rightCGImage.height)
+                        let targetAspect = size.width / size.height
+                        if imageAspect > targetAspect {
+                            let drawHeight = size.width / imageAspect
+                            drawRect = CGRect(x: 0, y: (size.height - drawHeight) / 2, width: size.width, height: drawHeight)
+                        } else {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: (size.width - drawWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        }
+                    } else {
+                        let imageAspect = CGFloat(rightCGImage.width) / CGFloat(rightCGImage.height)
+                        let targetAspect = size.width / size.height
+                        if imageAspect > targetAspect {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: -(drawWidth - size.width) / 2, y: 0, width: drawWidth, height: size.height)
+                        } else {
+                            let drawHeight = size.width / imageAspect
+                            drawRect = CGRect(x: 0, y: -(drawHeight - size.height) / 2, width: size.width, height: drawHeight)
+                        }
+                    }
+                    context.draw(rightCGImage, in: drawRect)
+                    context.restoreGState()
+                }
+                
+                // Draw LEFT image (visible on RIGHT side of slider - after divider)
+                if let leftCGImage = leftImg.cgImage {
+                    context.saveGState()
+                    let rightClip = CGRect(x: dividerX, y: 0, width: size.width - dividerX, height: size.height)
+                    context.clip(to: rightClip)
+                    
+                    let drawRect: CGRect
+                    if shouldFitImage {
+                        let imageAspect = CGFloat(leftCGImage.width) / CGFloat(leftCGImage.height)
+                        let targetAspect = size.width / size.height
+                        if imageAspect > targetAspect {
+                            let drawHeight = size.width / imageAspect
+                            drawRect = CGRect(x: 0, y: (size.height - drawHeight) / 2, width: size.width, height: drawHeight)
+                        } else {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: (size.width - drawWidth) / 2, y: 0, width: drawWidth, height: size.height)
+                        }
+                    } else {
+                        let imageAspect = CGFloat(leftCGImage.width) / CGFloat(leftCGImage.height)
+                        let targetAspect = size.width / size.height
+                        if imageAspect > targetAspect {
+                            let drawWidth = size.height * imageAspect
+                            drawRect = CGRect(x: -(drawWidth - size.width) / 2, y: 0, width: drawWidth, height: size.height)
+                        } else {
+                            let drawHeight = size.width / imageAspect
+                            drawRect = CGRect(x: 0, y: -(drawHeight - size.height) / 2, width: size.width, height: drawHeight)
+                        }
+                    }
+                    context.draw(leftCGImage, in: drawRect)
+                    context.restoreGState()
+                }
+                
+                // Draw white divider line
+                context.setFillColor(UIColor.white.cgColor)
+                context.fill(CGRect(x: dividerX - 0.5, y: 0, width: 1, height: size.height))
+            }
+            
+            // Reset coordinate system for drawing dates
+            context.scaleBy(x: 1.0, y: -1.0)
+            context.translateBy(x: 0, y: -size.height)
+
+            // Draw dates if enabled
+            if shouldShowDates {
+                Self.drawDatesSync(
+                    context: context,
+                    size: size,
+                    leftDate: leftDate,
+                    rightDate: rightDate,
+                    dateFormat: currentDateFormat,
+                    datePosition: currentDatePosition,
+                    dateFontSize: currentDateFontSize,
+                    dateColor: currentDateColor,
+                    showDateBackground: shouldShowDateBackground,
+                    isSlider: currentMode == .slider
+                )
+            }
+
+            return UIGraphicsGetImageFromCurrentImageContext()
+        }.value
+    }
+    
+    nonisolated private static func drawDatesSync(
+        context: CGContext,
+        size: CGSize,
+        leftDate: Date,
+        rightDate: Date,
+        dateFormat: DateFormat,
+        datePosition: DatePosition,
+        dateFontSize: DateFontSize,
+        dateColor: Color,
+        showDateBackground: Bool,
+        isSlider: Bool
+    ) {
+        let leftText = dateFormat.format(leftDate)
+        let rightText = dateFormat.format(rightDate)
+
+        // Get font size based on dateFontSize - scaled up for better visibility
+        let fontSize: CGFloat
+        switch dateFontSize {
+        case .small: fontSize = 18
+        case .medium: fontSize = 22
+        case .large: fontSize = 28
+        case .extraLarge: fontSize = 36
+        }
+
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor(dateColor),
+            .paragraphStyle: paragraphStyle
+        ]
+
+        // Calculate positions based on datePosition
+        let isTop = datePosition == .topLeft || datePosition == .topCenter || datePosition == .topRight
+        let padding: CGFloat = showDateBackground ? 16 : 12
+        let yPosition: CGFloat = isTop ? padding : size.height - fontSize - padding * 2
+        
+        // Determine X positions based on position setting
+        let leftX: CGFloat
+        let rightX: CGFloat
+        
+        // For parallel mode, dates are always in opposite corners
+        // For slider mode, they can be positioned based on setting
+        if !isSlider {
+            // Parallel mode: left date on left, right date on right
+            leftX = padding
+            let rightSize = rightText.size(withAttributes: attributes)
+            rightX = size.width - rightSize.width - padding - (showDateBackground ? 20 : 0)
+        } else {
+            // Slider mode: both dates respect the position setting
+            if datePosition == .topLeft || datePosition == .bottomLeft {
+                leftX = padding
+                let rightSize = rightText.size(withAttributes: attributes)
+                rightX = size.width - rightSize.width - padding - (showDateBackground ? 20 : 0)
+            } else if datePosition == .topRight || datePosition == .bottomRight {
+                let leftSize = leftText.size(withAttributes: attributes)
+                leftX = size.width - leftSize.width - padding - (showDateBackground ? 20 : 0)
+                rightX = padding
+            } else {
+                // Center position
+                let leftSize = leftText.size(withAttributes: attributes)
+                leftX = (size.width - leftSize.width) / 2
+                let rightSize = rightText.size(withAttributes: attributes)
+                rightX = (size.width - rightSize.width) / 2
+            }
+        }
+        
+        // Draw left date
+        let leftSize = leftText.size(withAttributes: attributes)
+
+        if showDateBackground {
+            let bgPadding: CGFloat = 12
+            let backgroundRect = CGRect(x: leftX, y: yPosition, width: leftSize.width + bgPadding * 2, height: leftSize.height + bgPadding)
+            let backgroundPath = UIBezierPath(roundedRect: backgroundRect, cornerRadius: backgroundRect.height / 2)
+            context.setFillColor(UIColor.black.withAlphaComponent(0.6).cgColor)
+            context.addPath(backgroundPath.cgPath)
+            context.fillPath()
+            leftText.draw(in: CGRect(x: leftX + bgPadding, y: yPosition + bgPadding / 2, width: leftSize.width, height: leftSize.height), withAttributes: attributes)
+        } else {
+            leftText.draw(in: CGRect(x: leftX, y: yPosition, width: leftSize.width, height: leftSize.height), withAttributes: attributes)
+        }
+
+        // Draw right date
+        let rightSize = rightText.size(withAttributes: attributes)
+
+        if showDateBackground {
+            let bgPadding: CGFloat = 12
+            let backgroundRect = CGRect(x: rightX - bgPadding, y: yPosition, width: rightSize.width + bgPadding * 2, height: rightSize.height + bgPadding)
+            let backgroundPath = UIBezierPath(roundedRect: backgroundRect, cornerRadius: backgroundRect.height / 2)
+            context.setFillColor(UIColor.black.withAlphaComponent(0.6).cgColor)
+            context.addPath(backgroundPath.cgPath)
+            context.fillPath()
+            rightText.draw(in: CGRect(x: rightX, y: yPosition + bgPadding / 2, width: rightSize.width, height: rightSize.height), withAttributes: attributes)
+        } else {
+            rightText.draw(in: CGRect(x: rightX, y: yPosition, width: rightSize.width, height: rightSize.height), withAttributes: attributes)
+        }
+    }
+}
+
+// MARK: - Photo Change Modifier
+struct PhotoChangeModifier: ViewModifier {
+    let left: ProgressPhoto?
+    let right: ProgressPhoto?
+    let mode: JourneyCompareView.CompareMode
+    let fitImage: Bool
+    let showDates: Bool
+    let dateFormat: DateFormat
+    let datePosition: DatePosition
+    let dateFont: DateFont
+    let dateFontSize: DateFontSize
+    let dateColor: Color
+    let showDateBackground: Bool
+    let onCapture: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(PhotoChangeGroup1(
+                leftId: left?.id,
+                rightId: right?.id,
+                mode: mode,
+                fitImage: fitImage,
+                onCapture: onCapture
+            ))
+            .modifier(DateChangeGroup(
+                showDates: showDates,
+                dateFormat: dateFormat,
+                datePosition: datePosition,
+                dateFont: dateFont,
+                dateFontSize: dateFontSize,
+                dateColor: dateColor,
+                showDateBackground: showDateBackground,
+                onCapture: onCapture
+            ))
+    }
+}
+
+struct PhotoChangeGroup1: ViewModifier {
+    let leftId: UUID?
+    let rightId: UUID?
+    let mode: JourneyCompareView.CompareMode
+    let fitImage: Bool
+    let onCapture: () -> Void
+    
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: leftId) { _, _ in onCapture() }
+            .onChange(of: rightId) { _, _ in onCapture() }
+            .onChange(of: mode) { _, _ in onCapture() }
+            .onChange(of: fitImage) { _, _ in onCapture() }
+    }
+}
+
+struct DateChangeGroup: ViewModifier {
+    let showDates: Bool
+    let dateFormat: DateFormat
+    let datePosition: DatePosition
+    let dateFont: DateFont
+    let dateFontSize: DateFontSize
+    let dateColor: Color
+    let showDateBackground: Bool
+    let onCapture: () -> Void
+    
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: showDates) { _, _ in onCapture() }
+            .onChange(of: dateFormat) { _, _ in onCapture() }
+            .onChange(of: datePosition) { _, _ in onCapture() }
+            .onChange(of: dateFont) { _, _ in onCapture() }
+            .onChange(of: dateFontSize) { _, _ in onCapture() }
+            .onChange(of: dateColor) { _, _ in onCapture() }
+            .onChange(of: showDateBackground) { _, _ in onCapture() }
     }
 }
 
@@ -482,6 +910,12 @@ struct ImprovedCompareCanvas: View {
     let showDates: Bool
     let fitImage: Bool
     @Binding var sliderPosition: CGFloat
+    let dateFormat: DateFormat
+    let datePosition: DatePosition
+    let dateFont: DateFont
+    let dateFontSize: DateFontSize
+    let dateColor: Color
+    let showDateBackground: Bool
 
     @State private var leftImg: UIImage?
     @State private var rightImg: UIImage?
@@ -545,35 +979,213 @@ struct ImprovedCompareCanvas: View {
                 // White divider line in the center
                 Rectangle()
                     .fill(.white)
-                    .frame(width: 3, height: geo.size.height)
+                    .frame(width: 1, height: geo.size.height)
             }
-            .overlay(alignment: .topLeading) {
-                // Date labels overlay at top corners
+            .overlay {
+                // Date labels overlay respecting position
                 if showDates {
-                    HStack {
-                        Text(left.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(AppStyle.FontStyle.caption)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.6), in: Capsule())
-                            .padding(12)
-
-                        Spacer()
-
-                        Text(right.date.formatted(date: .abbreviated, time: .omitted))
-                            .font(AppStyle.FontStyle.caption)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.6), in: Capsule())
-                            .padding(12)
-                    }
-                    .allowsHitTesting(false)
+                    parallelDateLabels(halfWidth: halfWidth, totalHeight: geo.size.height)
                 }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: AppStyle.Corner.lg))
+    }
+
+    private func parallelDateLabels(halfWidth: CGFloat, totalHeight: CGFloat) -> some View {
+        ZStack {
+            // Left date
+            VStack {
+                if datePosition == .topLeft || datePosition == .topCenter || datePosition == .topRight {
+                    HStack {
+                        if datePosition == .topLeft {
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                            Spacer()
+                        } else if datePosition == .topCenter {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                            Spacer()
+                        } else {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                        }
+                    }
+                    .frame(width: halfWidth)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer()
+                } else {
+                    Spacer()
+                    HStack {
+                        if datePosition == .bottomLeft {
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                            Spacer()
+                        } else if datePosition == .bottomCenter {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                            Spacer()
+                        } else {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                                .padding(12)
+                        }
+                    }
+                    .frame(width: halfWidth)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            // Right date
+            VStack {
+                if datePosition == .topLeft || datePosition == .topCenter || datePosition == .topRight {
+                    HStack {
+                        if datePosition == .topLeft {
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                            Spacer()
+                        } else if datePosition == .topCenter {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                            Spacer()
+                        } else {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                        }
+                    }
+                    .frame(width: halfWidth)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    Spacer()
+                } else {
+                    Spacer()
+                    HStack {
+                        if datePosition == .bottomLeft {
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                            Spacer()
+                        } else if datePosition == .bottomCenter {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                            Spacer()
+                        } else {
+                            Spacer()
+                            dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                                .padding(12)
+                        }
+                    }
+                    .frame(width: halfWidth)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func dateLabel(text: String, isLeft: Bool) -> some View {
+        Text(text)
+            .font(dateFont.font(size: dateFontSize))
+            .foregroundColor(dateColor)
+            .padding(.horizontal, showDateBackground ? 10 : 0)
+            .padding(.vertical, showDateBackground ? 6 : 0)
+            .background(
+                Group {
+                    if showDateBackground {
+                        Capsule()
+                            .fill(Color.black.opacity(0.6))
+                    }
+                }
+            )
+    }
+
+    private func sliderDateLabels() -> some View {
+        VStack {
+            if datePosition == .topLeft || datePosition == .topCenter || datePosition == .topRight {
+                HStack {
+                    if datePosition == .topLeft {
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                    } else if datePosition == .topCenter {
+                        Spacer()
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                        Spacer()
+                    } else {
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                    }
+                }
+                Spacer()
+            } else {
+                Spacer()
+                HStack {
+                    if datePosition == .bottomLeft {
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                    } else if datePosition == .bottomCenter {
+                        Spacer()
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                        Spacer()
+                    } else {
+                        dateLabel(text: dateFormat.format(left.date), isLeft: true)
+                            .padding(12)
+                        Spacer()
+                        dateLabel(text: dateFormat.format(right.date), isLeft: false)
+                            .padding(12)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func calculateDatePosition(forLeft: Bool, halfWidth: CGFloat, totalHeight: CGFloat) -> CGPoint {
+        let padding: CGFloat = 20
+        let x: CGFloat
+        let y: CGFloat
+
+        // Determine vertical position
+        switch datePosition {
+        case .topLeft, .topCenter, .topRight:
+            y = padding
+        case .bottomLeft, .bottomCenter, .bottomRight:
+            y = totalHeight - padding
+        }
+
+        // Determine horizontal position for each side
+        switch datePosition {
+        case .topLeft, .bottomLeft:
+            // Left position
+            x = forLeft ? padding : halfWidth + padding
+        case .topCenter, .bottomCenter:
+            // Center position
+            x = forLeft ? halfWidth / 2 : halfWidth + halfWidth / 2
+        case .topRight, .bottomRight:
+            // Right position
+            x = forLeft ? halfWidth - padding : halfWidth * 2 - padding
+        }
+
+        return CGPoint(x: x, y: y)
     }
     
     private func sliderView(leftImg: UIImage, rightImg: UIImage, width: CGFloat, height: CGFloat) -> some View {
@@ -653,29 +1265,7 @@ struct ImprovedCompareCanvas: View {
 
                 // Date labels for slider mode
                 if showDates {
-                    VStack {
-                        HStack {
-                            Text(left.date.formatted(date: .abbreviated, time: .omitted))
-                                .font(AppStyle.FontStyle.caption2)
-                                .foregroundColor(AppStyle.Colors.textPrimary)
-                                .padding(6)
-                                .background(AppStyle.Colors.bgDark.opacity(0.8))
-                                .cornerRadius(6)
-                                .padding(8)
-
-                            Spacer()
-
-                            Text(right.date.formatted(date: .abbreviated, time: .omitted))
-                                .font(AppStyle.FontStyle.caption2)
-                                .foregroundColor(AppStyle.Colors.textPrimary)
-                                .padding(6)
-                                .background(AppStyle.Colors.bgDark.opacity(0.8))
-                                .cornerRadius(6)
-                                .padding(8)
-                        }
-                        Spacer()
-                    }
-                    .allowsHitTesting(false)
+                    sliderDateLabels()
                 }
             }
         }

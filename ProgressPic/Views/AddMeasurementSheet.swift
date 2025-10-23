@@ -70,7 +70,7 @@ struct AddMeasurementSheet: View {
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(valueString.isEmpty ? .gray : .pink)
+                            .foregroundColor(valueString.isEmpty ? .gray : AppStyle.Colors.accentPrimary)
                     }
                     .disabled(valueString.isEmpty)
                 }

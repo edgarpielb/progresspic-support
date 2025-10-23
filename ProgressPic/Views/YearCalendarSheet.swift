@@ -133,7 +133,7 @@ struct YearCalendarSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "calendar.badge.checkmark")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     Text("\(stats.totalActiveDays)")
                         .font(.title2.bold())
                         .foregroundColor(.white)
@@ -148,7 +148,7 @@ struct YearCalendarSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "photo.fill")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     Text("\(stats.photoDays)")
                         .font(.title2.bold())
                         .foregroundColor(.white)
@@ -165,7 +165,7 @@ struct YearCalendarSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "ruler.fill")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     Text("\(stats.measurementDays)")
                         .font(.title2.bold())
                         .foregroundColor(.white)
@@ -180,7 +180,7 @@ struct YearCalendarSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "calendar.badge.plus")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     Text("\(stats.bothActivities)")
                         .font(.title2.bold())
                         .foregroundColor(.white)
@@ -522,7 +522,7 @@ private struct DayCell: View {
         ZStack {
             if isActive {
                 Circle()
-                    .fill(Color.pink)
+                    .fill(AppStyle.Colors.accentPrimary)
             } else {
                 Circle()
                     .fill(Color.white.opacity(0.05))
@@ -547,7 +547,7 @@ private struct StatRow: View {
         HStack {
             Image(systemName: icon)
                 .font(.body)
-                .foregroundStyle(.pink)
+                .foregroundStyle(AppStyle.Colors.accentPrimary)
                 .frame(width: 24)
             
             Text(label)

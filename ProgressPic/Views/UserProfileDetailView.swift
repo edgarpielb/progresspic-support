@@ -75,6 +75,17 @@ struct UserProfileDetailView: View {
                                     value: unit == .cm ? "Centimeters" : "Inches"
                                 )
                             }
+
+                            // Color Scheme
+                            ColorSchemePickerRow(
+                                selectedScheme: Binding(
+                                    get: { userProfile.colorScheme ?? .pink },
+                                    set: { newScheme in
+                                        userProfile.colorScheme = newScheme
+                                        userProfile.save()
+                                    }
+                                )
+                            )
                         }
                         .padding(.horizontal, 24)
                         
@@ -88,7 +99,7 @@ struct UserProfileDetailView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.pink)
+                            .background(AppStyle.Colors.accentPrimary)
                             .cornerRadius(12)
                         }
                         .padding(.horizontal, 24)
@@ -105,7 +116,7 @@ struct UserProfileDetailView: View {
                         dismiss()
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.pink)
+                            .foregroundColor(AppStyle.Colors.accentPrimary)
                     }
                 }
             }
@@ -128,13 +139,13 @@ struct ProfileDetailRow: View {
     let icon: String
     let title: String
     let value: String
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: icon)
                 .font(.headline)
                 .foregroundColor(.white)
-            
+
             Text(value)
                 .font(.title3)
                 .foregroundColor(.secondary)
@@ -142,6 +153,52 @@ struct ProfileDetailRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.white.opacity(0.1))
                 .cornerRadius(12)
+        }
+    }
+}
+
+struct ColorSchemePickerRow: View {
+    @Binding var selectedScheme: UserProfile.ColorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Theme Color", systemImage: "paintpalette.fill")
+                .font(.headline)
+                .foregroundColor(.white)
+
+            HStack(spacing: 12) {
+                ForEach(UserProfile.ColorScheme.allCases, id: \.self) { scheme in
+                    Button(action: {
+                        selectedScheme = scheme
+                    }) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(scheme == .cyan ? Color.cyan : Color.pink)
+                                .frame(width: 24, height: 24)
+
+                            Text(scheme.rawValue)
+                                .font(.body)
+                                .foregroundColor(.white)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(selectedScheme == scheme ? 0.2 : 0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(
+                                            selectedScheme == scheme
+                                                ? (scheme == .cyan ? Color.cyan : Color.pink)
+                                                : Color.clear,
+                                            lineWidth: 2
+                                        )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }

@@ -256,7 +256,7 @@ struct CameraHostView: View {
                     Button(action: { toggleGhostMode() }) {
                         Image(systemName: ghostEnabled ? "eye.fill" : "eye")
                             .font(.system(size: AppStyle.IconSize.xl))
-                            .foregroundColor(ghostEnabled ? AppStyle.Colors.accentCyan : AppStyle.Colors.textPrimary)
+                            .foregroundColor(ghostEnabled ? AppStyle.Colors.accentPrimary : AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
                 }
@@ -723,7 +723,7 @@ struct CameraHostView: View {
                     .frame(width: 140)
                     .rotationEffect(.degrees(-90))
                     .frame(width: 30, height: 140)
-                    .accentColor(AppStyle.Colors.accentCyan)
+                    .accentColor(AppStyle.Colors.accentPrimary)
                 Image(systemName: "eye.slash")
                     .font(.system(size: 15))
                     .foregroundColor(AppStyle.Colors.textPrimary)

@@ -73,7 +73,7 @@ struct ActivityView: View {
                 }) {
                     Image(systemName: "person.circle.fill")
                         .font(.title3)
-                        .foregroundColor(.pink)
+                        .foregroundColor(AppStyle.Colors.accentPrimary)
                 }
             }
         }
@@ -198,10 +198,14 @@ struct CombinedWeekAndStreakView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "calendar")
                         .font(.title3)
-                        .foregroundColor(.pink)
+                        .foregroundColor(AppStyle.Colors.accentPrimary)
                     Text("My Week")
                         .font(.title3.bold())
                         .foregroundColor(.white)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(AppStyle.Colors.textTertiary)
                 }
                 HStack(spacing: 10) {
                     ForEach(days, id: \.self) { d in
@@ -217,7 +221,7 @@ struct CombinedWeekAndStreakView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "flame.fill")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Current")
                             .font(.caption)
@@ -228,11 +232,11 @@ struct CombinedWeekAndStreakView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                
+
                 HStack(spacing: 8) {
                     Image(systemName: "trophy.fill")
                         .font(.title3)
-                        .foregroundStyle(.pink)
+                        .foregroundStyle(AppStyle.Colors.accentPrimary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Longest")
                             .font(.caption)
@@ -359,7 +363,7 @@ private struct EnhancedDayBubble: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color.pink, Color.pink.opacity(0.8)],
+                                colors: [AppStyle.Colors.accentPrimary, AppStyle.Colors.accentPrimary.opacity(0.8)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -405,7 +409,7 @@ struct AllMeasurementStatsSection: View {
                 HStack(spacing: 8) {
                     Image(systemName: "ruler")
                         .font(.title3)
-                        .foregroundColor(.pink)
+                        .foregroundColor(AppStyle.Colors.accentPrimary)
                     Text("Body Measurements")
                         .font(.title3.bold())
                         .foregroundColor(.white)
@@ -599,7 +603,7 @@ struct BodyCompositionSection: View {
                 HStack(spacing: 8) {
                     Image(systemName: "heart.text.square")
                         .font(.title3)
-                        .foregroundColor(.pink)
+                        .foregroundColor(AppStyle.Colors.accentPrimary)
                     Text("Body Composition")
                         .font(.title3.bold())
                         .foregroundColor(.white)

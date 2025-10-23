@@ -158,7 +158,7 @@ struct MeasurementDetailView: View {
                                     .font(.caption)
                                 Text(measurementType.title.uppercased())
                                     .font(.caption)
-                                    .foregroundStyle(.pink)
+                                    .foregroundStyle(AppStyle.Colors.accentPrimary)
                             }
                             
                             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -231,14 +231,14 @@ struct MeasurementDetailView: View {
                                     x: .value("Date", formatXAxisLabel(entry.date)),
                                     y: .value("Value", entry.value)
                                 )
-                                .foregroundStyle(.pink)
+                                .foregroundStyle(AppStyle.Colors.accentPrimary)
                                 .interpolationMethod(.catmullRom)
                                 
                                 PointMark(
                                     x: .value("Date", formatXAxisLabel(entry.date)),
                                     y: .value("Value", entry.value)
                                 )
-                                .foregroundStyle(.pink)
+                                .foregroundStyle(AppStyle.Colors.accentPrimary)
                                 .symbolSize(30)
                             }
                         }
@@ -399,7 +399,7 @@ struct MeasurementDetailView: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 24)
                             .padding(.vertical, 12)
-                            .background(Color.pink)
+                            .background(AppStyle.Colors.accentPrimary)
                             .cornerRadius(24)
                     }
                     .padding(.trailing, 20)

@@ -1,6 +1,7 @@
 import SwiftUI
 import Photos
 import PhotosUI
+import ImageIO
 
 // MARK: - PhotoStore (Local file storage)
 enum PhotoStore {
@@ -294,33 +295,104 @@ enum PhotoStore {
     /// This returns the actual date the photo was taken, not the import date
     static func getEXIFCreationDate(from asset: PHAsset) async -> Date? {
         return await withCheckedContinuation { continuation in
-            let options = PHContentEditingInputRequestOptions()
+            // Try two methods: first PHImageManager for image data, then fallback to PHContentEditingInput
+            let manager = PHImageManager.default()
+            let options = PHImageRequestOptions()
+            options.isSynchronous = false
             options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
 
-            asset.requestContentEditingInput(with: options) { input, _ in
-                guard let url = input?.fullSizeImageURL,
-                      let ciImage = CIImage(contentsOf: url),
-                      let exifData = ciImage.properties["{Exif}"] as? [String: Any],
-                      let dateString = exifData["DateTimeOriginal"] as? String else {
-                    // Fallback to PHAsset creationDate if EXIF not available
-                    continuation.resume(returning: asset.creationDate)
+            manager.requestImageDataAndOrientation(for: asset, options: options) { imageData, _, _, _ in
+                // Try to extract EXIF from image data
+                if let data = imageData,
+                   let date = extractEXIFDate(from: data) {
+                    print("✅ Successfully extracted EXIF date: \(date)")
+                    continuation.resume(returning: date)
                     return
                 }
 
-                // Parse EXIF date format: "yyyy:MM:dd HH:mm:ss"
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.timeZone = TimeZone.current
+                // Fallback: Try using PHContentEditingInput
+                let editingOptions = PHContentEditingInputRequestOptions()
+                editingOptions.isNetworkAccessAllowed = true
 
-                if let date = formatter.date(from: dateString) {
-                    continuation.resume(returning: date)
-                } else {
-                    // Fallback if parsing fails
+                asset.requestContentEditingInput(with: editingOptions) { input, _ in
+                    if let url = input?.fullSizeImageURL,
+                       let data = try? Data(contentsOf: url),
+                       let date = extractEXIFDate(from: data) {
+                        print("✅ Successfully extracted EXIF date from editing input: \(date)")
+                        continuation.resume(returning: date)
+                        return
+                    }
+
+                    // Final fallback: use PHAsset creationDate
+                    print("⚠️ Could not extract EXIF date, using PHAsset.creationDate")
                     continuation.resume(returning: asset.creationDate)
                 }
             }
         }
+    }
+
+    /// Helper function to extract EXIF date from image data
+    static func extractEXIFDate(from imageData: Data) -> Date? {
+        guard let imageSource = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let imageProperties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] else {
+            return nil
+        }
+
+        // Try EXIF dictionary first (most reliable for camera photos)
+        if let exifDict = imageProperties[kCGImagePropertyExifDictionary as String] as? [String: Any],
+           let dateString = exifDict[kCGImagePropertyExifDateTimeOriginal as String] as? String,
+           let date = parseEXIFDateString(dateString) {
+            return date
+        }
+
+        // Fallback: Try TIFF dictionary (some photos store date here)
+        if let tiffDict = imageProperties[kCGImagePropertyTIFFDictionary as String] as? [String: Any],
+           let dateString = tiffDict[kCGImagePropertyTIFFDateTime as String] as? String,
+           let date = parseEXIFDateString(dateString) {
+            return date
+        }
+
+        // Fallback: Try GPS dictionary for timestamp
+        if let gpsDict = imageProperties[kCGImagePropertyGPSDictionary as String] as? [String: Any],
+           let dateString = gpsDict[kCGImagePropertyGPSDateStamp as String] as? String,
+           let timeString = gpsDict[kCGImagePropertyGPSTimeStamp as String] as? String,
+           let date = parseGPSDateTime(dateString: dateString, timeString: timeString) {
+            return date
+        }
+
+        return nil
+    }
+
+    /// Parse EXIF date string format: "yyyy:MM:dd HH:mm:ss"
+    private static func parseEXIFDateString(_ dateString: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        return formatter.date(from: dateString)
+    }
+
+    /// Parse GPS date and time
+    private static func parseGPSDateTime(dateString: String, timeString: String) -> Date? {
+        let combinedString = "\(dateString) \(timeString)"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0) // GPS time is UTC
+        return formatter.date(from: combinedString)
+    }
+
+    /// Extract EXIF date directly from UIImage
+    /// This is a fallback when PHAsset is not available
+    static func extractDateFromUIImage(_ image: UIImage) -> Date? {
+        // Try to get image data from the UIImage
+        guard let imageData = image.jpegData(compressionQuality: 1.0) else {
+            print("⚠️ Could not convert UIImage to JPEG data")
+            return nil
+        }
+
+        return extractEXIFDate(from: imageData)
     }
 }
 

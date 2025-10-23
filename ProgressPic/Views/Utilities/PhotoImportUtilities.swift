@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Photos
 import PhotosUI
+import UniformTypeIdentifiers
 
 // MARK: - Selected Photo Data
 
@@ -19,20 +20,21 @@ struct ImagePicker: UIViewControllerRepresentable {
     @Environment(\.dismiss) private var dismiss
     
     func makeUIViewController(context: Context) -> PHPickerViewController {
-        var config = PHPickerConfiguration()
+        // IMPORTANT: Use PHPhotoLibrary.shared() to get assetIdentifier from results
+        var config = PHPickerConfiguration(photoLibrary: PHPhotoLibrary.shared())
         config.filter = .images
         config.selectionLimit = 0 // Allow multiple selection
         config.selection = .ordered
-        
+
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
-        
+
         // Force dark mode to ensure proper contrast (white checkmark on dark background)
         picker.overrideUserInterfaceStyle = .dark
-        
+
         // Set the tint color for the selection checkmarks
         picker.view.tintColor = UIColor.systemBlue // Use system blue for better visibility
-        
+
         return picker
     }
 
@@ -53,48 +55,52 @@ struct ImagePicker: UIViewControllerRepresentable {
         
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
-            
+
             guard !results.isEmpty else { return }
-            
+
             var newImages: [UIImage] = []
             var newPhotoData: [SelectedPhotoData] = []
             let group = DispatchGroup()
-            
+
             for result in results {
                 group.enter()
-                
-                // Get asset identifier if available
+
                 let assetIdentifier = result.assetIdentifier
-                
-                result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
-                    defer { group.leave() }
-                    
-                    if let error = error {
-                        print("Error loading image: \(error)")
-                        return
-                    }
-                    
-                    if let image = object as? UIImage {
-                        newImages.append(image)
-                        
-                        // Store asset identifier for later EXIF date extraction
-                        // We'll extract the actual EXIF date when saving, not the import date
-                        var creationDate: Date?
-                        if assetIdentifier != nil {
-                            // Just store nil for now - we'll get EXIF date during save
-                            creationDate = nil
+
+                // Load image data to preserve EXIF metadata
+                if result.itemProvider.canLoadObject(ofClass: UIImage.self) {
+                    result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
+                        guard let imageData = data, error == nil else {
+                            group.leave()
+                            return
                         }
-                        
-                        let photoData = SelectedPhotoData(
-                            image: image,
-                            assetIdentifier: assetIdentifier,
-                            creationDate: creationDate
-                        )
-                        newPhotoData.append(photoData)
+
+                        // Extract EXIF date from the data
+                        let exifDate = PhotoStore.extractEXIFDate(from: imageData)
+
+                        // Convert data to UIImage
+                        guard let image = UIImage(data: imageData) else {
+                            group.leave()
+                            return
+                        }
+
+                        DispatchQueue.main.async {
+                            newImages.append(image)
+
+                            let photoData = SelectedPhotoData(
+                                image: image,
+                                assetIdentifier: assetIdentifier,
+                                creationDate: exifDate
+                            )
+                            newPhotoData.append(photoData)
+                            group.leave()
+                        }
                     }
+                } else {
+                    group.leave()
                 }
             }
-            
+
             group.notify(queue: .main) {
                 self.parent.selectedImages.append(contentsOf: newImages)
                 self.parent.selectedPhotoData.append(contentsOf: newPhotoData)
@@ -249,7 +255,7 @@ struct ImportPhotosView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.pink)
+                            .foregroundColor(AppStyle.Colors.accentPrimary)
                             .font(.body.weight(.semibold))
                     }
                 }
@@ -275,16 +281,30 @@ struct ImportPhotosView: View {
                     // For imported photos, copy them to app directory to avoid photo library dependency
                     localId = try await PhotoStore.saveToAppDirectory(photoData.image)
 
-                    // Get EXIF creation date if asset identifier is available
-                    if let assetId = photoData.assetIdentifier,
-                       let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject {
-                        date = await PhotoStore.getEXIFCreationDate(from: asset) ?? Date()
-                        print("📅 Extracted EXIF date: \(date) for photo \(index + 1)")
+                    // Use the EXIF date that was extracted during photo selection
+                    // If no EXIF date was found, fall back to current date
+                    if let exifDate = photoData.creationDate {
+                        date = exifDate
+                        print("📅 Import Photo \(index + 1): Using extracted EXIF date: \(date)")
                     } else {
-                        date = photoData.creationDate ?? Date()
+                        print("⚠️ Import Photo \(index + 1): No creationDate in photoData")
+                        // Last resort: try to extract from PHAsset if available
+                        if let assetId = photoData.assetIdentifier {
+                            print("🔍 Import Photo \(index + 1): Trying PHAsset fallback with ID: \(assetId)")
+                            if let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject {
+                                date = await PhotoStore.getEXIFCreationDate(from: asset) ?? Date()
+                                print("📅 Import Photo \(index + 1): Extracted from PHAsset: \(date)")
+                            } else {
+                                print("❌ Import Photo \(index + 1): Could not fetch PHAsset")
+                                date = Date()
+                            }
+                        } else {
+                            print("⚠️ Import Photo \(index + 1): No asset identifier, using current date")
+                            date = Date()
+                        }
                     }
 
-                    print("💾 Copied imported photo \(index + 1)/\(selectedPhotoData.count) to app directory")
+                    print("💾 Import Photo \(index + 1)/\(selectedPhotoData.count): Saving with date \(date)")
                     
                     // Calculate initial transform to fill 4:5 aspect ratio
                     let initialTransform = calculateInitialTransform(for: photoData.image.size)

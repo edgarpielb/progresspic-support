@@ -122,7 +122,7 @@ struct UserProfileSetupView: View {
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding()
-                                .background(isValidInput ? Color.pink : Color.gray.opacity(0.3))
+                                .background(isValidInput ? AppStyle.Colors.accentPrimary : Color.gray.opacity(0.3))
                                 .cornerRadius(12)
                         }
                         .disabled(!isValidInput)
@@ -146,7 +146,7 @@ struct UserProfileSetupView: View {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(action: { dismiss() }) {
                             Image(systemName: "xmark")
-                                .foregroundColor(.pink)
+                                .foregroundColor(AppStyle.Colors.accentPrimary)
                         }
                     }
                 }

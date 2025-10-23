@@ -8,37 +8,50 @@ enum AppStyle {
     enum Colors {
         /// Main background color - dark gray
         static let bgDark = Color(red: 30/255, green: 32/255, blue: 35/255)
-        
+
         /// Panel/card background - slightly lighter
         static let panel = Color.white.opacity(0.06)
-        
+
         /// Panel with blur overlay
         static let panelOverlay = bgDark.opacity(0.8)
-        
+
         /// Primary text - white
         static let textPrimary = Color.white
-        
+
         /// Secondary text - light gray
         static let textSecondary = Color.white.opacity(0.7)
-        
+
         /// Tertiary text - lighter gray
         static let textTertiary = Color.white.opacity(0.5)
-        
+
         /// Accent color - cyan/white for highlights
         static let accent = Color.white
-        
+
         /// Accent color - red for destructive actions
         static let accentRed = Color.red
-        
+
         /// Accent color - cyan for selection
         static let accentCyan = Color.cyan
-        
+
+        /// Primary accent color - dynamically chosen based on user preference (cyan or pink)
+        static var accentPrimary: Color {
+            let profile = UserProfile.load()
+            switch profile.colorScheme {
+            case .cyan:
+                return Color.cyan
+            case .pink:
+                return Color.pink
+            case .none:
+                return Color.pink // Default to pink for backwards compatibility
+            }
+        }
+
         /// Border color - subtle white
         static let border = Color.white.opacity(0.14)
-        
+
         /// Border color - stronger
         static let borderStrong = Color.white.opacity(0.25)
-        
+
         /// Glass overlay
         static let glassOverlay = bgDark.opacity(0.9)
     }

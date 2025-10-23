@@ -320,7 +320,7 @@ struct PhotoEditSheet: View {
                 VStack(spacing: AppStyle.Spacing.xl) {
                     DatePicker("Date & Time", selection: $selectedDate, displayedComponents: [.date, .hourAndMinute])
                         .datePickerStyle(.graphical)
-                        .tint(AppStyle.Colors.accentCyan)
+                        .tint(AppStyle.Colors.accentPrimary)
                         .padding()
                 }
             }
@@ -688,11 +688,11 @@ struct PhotoAdjustSheet: View {
                     }) {
                         if isSaving {
                             ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                                .progressViewStyle(CircularProgressViewStyle(tint: AppStyle.Colors.accentPrimary))
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: "checkmark")
-                                .foregroundColor((image == nil) ? .gray : .pink)
+                                .foregroundColor((image == nil) ? .gray : AppStyle.Colors.accentPrimary)
                                 .font(.body.weight(.semibold))
                         }
                     }
@@ -720,7 +720,7 @@ struct PhotoAdjustSheet: View {
                                 Text("Rotate")
                                     .font(.subheadline.weight(.medium))
                             }
-                            .foregroundColor(showRotationControls ? .pink : .white.opacity(0.7))
+                            .foregroundColor(showRotationControls ? AppStyle.Colors.accentPrimary : .white.opacity(0.7))
                         }
                         
                         Spacer()
@@ -753,7 +753,7 @@ struct PhotoAdjustSheet: View {
                                         lastRotation = rotation
                                     }
                                 ), in: -45...45, step: 1)
-                                .tint(.pink)
+                                .tint(AppStyle.Colors.accentPrimary)
                                 
                                 Text("\(Int(rotation.degrees))°")
                                     .font(.caption.monospacedDigit())
@@ -778,7 +778,7 @@ struct PhotoAdjustSheet: View {
                                     Text("Ghost Overlay")
                                         .font(.subheadline.weight(.medium))
                                 }
-                                .foregroundColor(showGhost ? .cyan : .white.opacity(0.7))
+                                .foregroundColor(showGhost ? AppStyle.Colors.accentPrimary : .white.opacity(0.7))
                             }
                             
                             Spacer()
@@ -802,9 +802,9 @@ struct PhotoAdjustSheet: View {
                                             .padding(.vertical, 4)
                                             .background(
                                                 RoundedRectangle(cornerRadius: 6)
-                                                    .fill(!useLastAsGhost ? Color.cyan.opacity(0.3) : Color.white.opacity(0.1))
+                                                    .fill(!useLastAsGhost ? AppStyle.Colors.accentPrimary.opacity(0.3) : Color.white.opacity(0.1))
                                             )
-                                            .foregroundColor(!useLastAsGhost ? .cyan : .white.opacity(0.7))
+                                            .foregroundColor(!useLastAsGhost ? AppStyle.Colors.accentPrimary : .white.opacity(0.7))
                                     }
                                     
                                     Button(action: {
@@ -819,9 +819,9 @@ struct PhotoAdjustSheet: View {
                                             .padding(.vertical, 4)
                                             .background(
                                                 RoundedRectangle(cornerRadius: 6)
-                                                    .fill(useLastAsGhost ? Color.cyan.opacity(0.3) : Color.white.opacity(0.1))
+                                                    .fill(useLastAsGhost ? AppStyle.Colors.accentPrimary.opacity(0.3) : Color.white.opacity(0.1))
                                             )
-                                            .foregroundColor(useLastAsGhost ? .cyan : .white.opacity(0.7))
+                                            .foregroundColor(useLastAsGhost ? AppStyle.Colors.accentPrimary : .white.opacity(0.7))
                                     }
                                 }
                             }
@@ -833,7 +833,7 @@ struct PhotoAdjustSheet: View {
                                 Image(systemName: "circle.lefthalf.filled")
                                     .foregroundColor(.white.opacity(0.7))
                                 Slider(value: $ghostOpacity, in: 0...1)
-                                    .tint(.cyan)
+                                    .tint(AppStyle.Colors.accentPrimary)
                                 Text("\(Int(ghostOpacity * 100))%")
                                     .font(.caption)
                                     .foregroundColor(.white.opacity(0.7))

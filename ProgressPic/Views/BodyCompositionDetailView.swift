@@ -94,7 +94,7 @@ struct BodyCompositionDetailView: View {
                                     .font(.caption)
                                 Text(metricType.title.uppercased())
                                     .font(.caption)
-                                    .foregroundStyle(.pink)
+                                    .foregroundStyle(AppStyle.Colors.accentPrimary)
                             }
                             
                             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -166,14 +166,14 @@ struct BodyCompositionDetailView: View {
                                     x: .value("Date", formatXAxisLabel(point.date)),
                                     y: .value("Value", point.value)
                                 )
-                                .foregroundStyle(.pink)
+                                .foregroundStyle(AppStyle.Colors.accentPrimary)
                                 .interpolationMethod(.catmullRom)
                                 
                                 PointMark(
                                     x: .value("Date", formatXAxisLabel(point.date)),
                                     y: .value("Value", point.value)
                                 )
-                                .foregroundStyle(.pink)
+                                .foregroundStyle(AppStyle.Colors.accentPrimary)
                                 .symbolSize(30)
                             }
                         }
@@ -237,7 +237,7 @@ struct BodyCompositionDetailView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(spacing: 8) {
                                 Image(systemName: "heart.text.square")
-                                    .foregroundColor(.pink)
+                                    .foregroundColor(AppStyle.Colors.accentPrimary)
                                 Text("Healthy Range")
                                     .font(.title3.bold())
                                     .foregroundColor(.white)
@@ -333,7 +333,7 @@ struct BodyCompositionDetailView: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 24)
                             .padding(.vertical, 12)
-                            .background(Color.pink)
+                            .background(AppStyle.Colors.accentPrimary)
                             .cornerRadius(24)
                     }
                     .padding(.trailing, 20)

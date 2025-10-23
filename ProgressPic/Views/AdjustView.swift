@@ -139,7 +139,7 @@ struct AdjustView: View {
                         Task { await save() }
                     }) {
                         Image(systemName: "checkmark")
-                            .foregroundColor(.pink)
+                            .foregroundColor(AppStyle.Colors.accentPrimary)
                             .font(.body.weight(.semibold))
                     }
                 }
@@ -194,7 +194,7 @@ struct AdjustView: View {
                                         lastRotation = rotation
                                     }
                                 ), in: -45...45, step: 1)
-                                .tint(.pink)
+                                .tint(AppStyle.Colors.accentPrimary)
                                 
                                 Text("\(Int(rotation.degrees))°")
                                     .font(.caption.monospacedDigit())
@@ -219,7 +219,7 @@ struct AdjustView: View {
                                     Text("Ghost Overlay")
                                         .font(.subheadline.weight(.medium))
                                 }
-                                .foregroundColor(showGhost ? .cyan : .white.opacity(0.7))
+                                .foregroundColor(showGhost ? AppStyle.Colors.accentPrimary : .white.opacity(0.7))
                             }
 
                             Spacer()
@@ -231,7 +231,7 @@ struct AdjustView: View {
                                 Image(systemName: "circle.lefthalf.filled")
                                     .foregroundColor(.white.opacity(0.7))
                                 Slider(value: $opacity, in: 0...1)
-                                    .tint(.cyan)
+                                    .tint(AppStyle.Colors.accentPrimary)
                                 Text("\(Int(opacity * 100))%")
                                     .font(.caption)
                                     .foregroundColor(.white.opacity(0.7))
