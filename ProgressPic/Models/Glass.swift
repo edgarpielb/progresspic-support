@@ -9,7 +9,7 @@ struct GlassCard: ViewModifier {
                 ZStack {
                     // Dark base layer to prevent purple tint
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                        .fill(AppStyle.Colors.bgDark.opacity(0.8))
                     // Material blur on top
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
                         .fill(.ultraThinMaterial)
@@ -30,7 +30,7 @@ struct GlassCapsule: ViewModifier {
                 ZStack {
                     // Dark base layer to prevent purple tint
                     Capsule()
-                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                        .fill(AppStyle.Colors.bgDark.opacity(0.8))
                     // Material blur on top
                     Capsule()
                         .fill(.ultraThinMaterial)
@@ -50,7 +50,7 @@ struct GlassTile: ViewModifier {
                 ZStack {
                     // Dark base layer to prevent purple tint
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .fill(Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8))
+                        .fill(AppStyle.Colors.bgDark.opacity(0.8))
                     // Material blur on top
                     RoundedRectangle(cornerRadius: corner, style: .continuous)
                         .fill(.ultraThinMaterial)

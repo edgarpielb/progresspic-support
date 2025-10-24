@@ -17,29 +17,46 @@ struct BodyCompositionDetailView: View {
     
     private var aggregatedData: [HealthDataPoint] {
         guard !historicalData.isEmpty else { return [] }
-        
+
+        let createPoint = { (date: Date, value: Double) -> HealthDataPoint in
+            HealthDataPoint(date: date, value: value)
+        }
+
         switch selectedTimeRange {
         case .week:
-            // Normalize to start of each day
-            return aggregateByDay(historicalData)
+            return ChartAggregationHelpers.aggregateByDay(
+                historicalData,
+                dateKeyPath: \.date,
+                valueKeyPath: \.value,
+                createPoint: createPoint
+            )
         case .month:
-            // Aggregate by week
-            return aggregateByWeek(historicalData)
-        case .sixMonths:
-            // Aggregate by month
-            return aggregateByMonth(historicalData)
-        case .year:
-            // Aggregate by month
-            return aggregateByMonth(historicalData)
+            return ChartAggregationHelpers.aggregateByWeek(
+                historicalData,
+                dateKeyPath: \.date,
+                valueKeyPath: \.value,
+                createPoint: createPoint
+            )
+        case .sixMonths, .year:
+            return ChartAggregationHelpers.aggregateByMonth(
+                historicalData,
+                dateKeyPath: \.date,
+                valueKeyPath: \.value,
+                createPoint: createPoint
+            )
         case .all:
-            // Aggregate by quarter
-            return aggregateByQuarter(historicalData)
+            return ChartAggregationHelpers.aggregateByQuarter(
+                historicalData,
+                dateKeyPath: \.date,
+                valueKeyPath: \.value,
+                createPoint: createPoint
+            )
         }
     }
     
     var body: some View {
         ZStack {
-            Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+            AppStyle.Colors.bgDark.ignoresSafeArea()
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -62,29 +79,12 @@ struct BodyCompositionDetailView: View {
                     .padding(.top, 8)
                     
                     // Time Range Selector
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(TimeRange.allCases) { range in
-                                Button(action: {
-                                    selectedTimeRange = range
-                                    Task {
-                                        await fetchData()
-                                    }
-                                }) {
-                                    Text(range.rawValue)
-                                        .font(.subheadline)
-                                        .foregroundColor(selectedTimeRange == range ? .white : .white.opacity(0.6))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 20)
-                                                .fill(selectedTimeRange == range ? Color.white.opacity(0.2) : Color.white.opacity(0.06))
-                                        )
-                                }
+                    TimeRangeSelector(selectedRange: $selectedTimeRange)
+                        .onChange(of: selectedTimeRange) { _, _ in
+                            Task {
+                                await fetchData()
                             }
                         }
-                        .padding(.horizontal)
-                    }
                     
                     // Stats Summary
                     if !historicalData.isEmpty {
@@ -541,209 +541,6 @@ struct BodyCompositionDetailView: View {
         }
     }
     
-    private func aggregateByDay(_ data: [HealthDataPoint]) -> [HealthDataPoint] {
-        guard !data.isEmpty else { return [] }
-        
-        let calendar = Calendar.current
-        var dailyData: [Date: [Double]] = [:]
-        // Pre-allocate capacity for better performance
-        dailyData.reserveCapacity(min(data.count, 7))
-        
-        // Collect data points by day
-        for point in data {
-            let dayStart = calendar.startOfDay(for: point.date)
-            if dailyData[dayStart] == nil {
-                dailyData[dayStart] = []
-            }
-            dailyData[dayStart]?.append(point.value)
-        }
-        
-        // Get the most recent date and find the week it belongs to
-        guard let mostRecentDate = data.map({ $0.date }).max() else {
-            return []
-        }
-        
-        // Find Monday of the week containing the most recent date
-        var weekStart = calendar.startOfDay(for: mostRecentDate)
-        let weekday = calendar.component(.weekday, from: weekStart)
-        
-        // Adjust to Monday (weekday 2 in Gregorian calendar, 1 = Sunday)
-        let daysToSubtract = weekday == 1 ? 6 : weekday - 2
-        weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
-        
-        // Generate all 7 days (Mon-Sun)
-        var results: [HealthDataPoint] = []
-        var currentDate = weekStart
-        
-        for _ in 0..<7 {
-            if let values = dailyData[currentDate] {
-                let average = values.reduce(0, +) / Double(values.count)
-                results.append(HealthDataPoint(date: currentDate, value: average))
-            } else {
-                // Add interpolated point to maintain chart structure
-                if let lastValue = results.last?.value {
-                    results.append(HealthDataPoint(date: currentDate, value: lastValue))
-                }
-            }
-            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
-        }
-        
-        return results
-    }
-    
-    private func aggregateByWeek(_ data: [HealthDataPoint]) -> [HealthDataPoint] {
-        guard !data.isEmpty else { return [] }
-        
-        let calendar = Calendar.current
-        var weeklyData: [Date: [Double]] = [:]
-        
-        // Collect data points by week
-        for point in data {
-            let weekStart = calendar.dateInterval(of: .weekOfYear, for: point.date)?.start ?? point.date
-            if weeklyData[weekStart] == nil {
-                weeklyData[weekStart] = []
-            }
-            weeklyData[weekStart]?.append(point.value)
-        }
-        
-        // Get the first and last dates
-        guard let firstDate = data.map({ $0.date }).min(),
-              let lastDate = data.map({ $0.date }).max() else {
-            return []
-        }
-        
-        let startWeek = calendar.dateInterval(of: .weekOfYear, for: firstDate)?.start ?? firstDate
-        let endWeek = calendar.dateInterval(of: .weekOfYear, for: lastDate)?.start ?? lastDate
-        
-        // Generate all weeks in range
-        var results: [HealthDataPoint] = []
-        var currentDate = startWeek
-        
-        while currentDate <= endWeek {
-            if let values = weeklyData[currentDate] {
-                let average = values.reduce(0, +) / Double(values.count)
-                results.append(HealthDataPoint(date: currentDate, value: average))
-            }
-            // Don't add interpolated points - only plot actual data
-            currentDate = calendar.date(byAdding: .weekOfYear, value: 1, to: currentDate) ?? currentDate
-        }
-        
-        return results
-    }
-    
-    private func aggregateByMonth(_ data: [HealthDataPoint]) -> [HealthDataPoint] {
-        guard !data.isEmpty else { return [] }
-        
-        let calendar = Calendar.current
-        var monthlyData: [Date: [Double]] = [:]
-        
-        // Collect data points by month
-        for point in data {
-            let monthStart = calendar.dateInterval(of: .month, for: point.date)?.start ?? point.date
-            if monthlyData[monthStart] == nil {
-                monthlyData[monthStart] = []
-            }
-            monthlyData[monthStart]?.append(point.value)
-        }
-        
-        // Get the most recent date and calculate 12 months back
-        guard let mostRecentDate = data.map({ $0.date }).max() else {
-            return []
-        }
-        
-        let endMonth = calendar.dateInterval(of: .month, for: mostRecentDate)?.start ?? mostRecentDate
-        // Go back 11 months (12 months total including current)
-        let startMonth = calendar.date(byAdding: .month, value: -11, to: endMonth) ?? endMonth
-        
-        // Generate only the most recent 12 months
-        var results: [HealthDataPoint] = []
-        var currentDate = startMonth
-        
-        while currentDate <= endMonth {
-            if let values = monthlyData[currentDate] {
-                let average = values.reduce(0, +) / Double(values.count)
-                results.append(HealthDataPoint(date: currentDate, value: average))
-            }
-            // Don't add interpolated points - only plot actual data
-            currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
-        }
-        
-        return results
-    }
-    
-    private func aggregateByQuarter(_ data: [HealthDataPoint]) -> [HealthDataPoint] {
-        guard !data.isEmpty else { return [] }
-        
-        let calendar = Calendar.current
-        var quarterlyData: [Date: [Double]] = [:]
-        
-        // Collect data points by quarter
-        for point in data {
-            let components = calendar.dateComponents([.year, .month], from: point.date)
-            let month = components.month ?? 1
-            let year = components.year ?? 2024
-            let quarterStartMonth = ((month - 1) / 3) * 3 + 1
-            
-            var quarterComponents = DateComponents()
-            quarterComponents.year = year
-            quarterComponents.month = quarterStartMonth
-            quarterComponents.day = 1
-            
-            if let quarterStart = calendar.date(from: quarterComponents) {
-                if quarterlyData[quarterStart] == nil {
-                    quarterlyData[quarterStart] = []
-                }
-                quarterlyData[quarterStart]?.append(point.value)
-            }
-        }
-        
-        // Get the first and last dates
-        guard let firstDate = data.map({ $0.date }).min(),
-              let lastDate = data.map({ $0.date }).max() else {
-            return []
-        }
-        
-        // Get quarter starts
-        let firstComponents = calendar.dateComponents([.year, .month], from: firstDate)
-        let firstMonth = firstComponents.month ?? 1
-        let firstYear = firstComponents.year ?? 2024
-        let firstQuarterMonth = ((firstMonth - 1) / 3) * 3 + 1
-        
-        var startComponents = DateComponents()
-        startComponents.year = firstYear
-        startComponents.month = firstQuarterMonth
-        startComponents.day = 1
-        
-        let lastComponents = calendar.dateComponents([.year, .month], from: lastDate)
-        let lastMonth = lastComponents.month ?? 1
-        let lastYear = lastComponents.year ?? 2024
-        let lastQuarterMonth = ((lastMonth - 1) / 3) * 3 + 1
-        
-        var endComponents = DateComponents()
-        endComponents.year = lastYear
-        endComponents.month = lastQuarterMonth
-        endComponents.day = 1
-        
-        guard let startQuarter = calendar.date(from: startComponents),
-              let endQuarter = calendar.date(from: endComponents) else {
-            return []
-        }
-        
-        // Generate all quarters in range
-        var results: [HealthDataPoint] = []
-        var currentDate = startQuarter
-        
-        while currentDate <= endQuarter {
-            if let values = quarterlyData[currentDate] {
-                let average = values.reduce(0, +) / Double(values.count)
-                results.append(HealthDataPoint(date: currentDate, value: average))
-            }
-            // Don't add interpolated points - only plot actual data
-            currentDate = calendar.date(byAdding: .month, value: 3, to: currentDate) ?? currentDate
-        }
-        
-        return results
-    }
 }
 
 struct HealthyRangeComparison {

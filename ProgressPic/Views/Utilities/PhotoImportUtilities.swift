@@ -133,7 +133,7 @@ struct ImportPhotosView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                AppStyle.Colors.bgDark.ignoresSafeArea()
                 
                 VStack(spacing: 20) {
                     if selectedImages.isEmpty {
@@ -230,7 +230,7 @@ struct ImportPhotosView: View {
                 
                 if isImporting {
                     ZStack {
-                        Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.8).ignoresSafeArea()
+                        AppStyle.Colors.bgDark.opacity(0.8).ignoresSafeArea()
                         VStack(spacing: 16) {
                             ProgressView()
                                 .tint(.white)
@@ -240,7 +240,7 @@ struct ImportPhotosView: View {
                         .padding()
                         .background(
                             ZStack {
-                                Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
+                                AppStyle.Colors.bgDark.opacity(0.9)
                                 Rectangle()
                                     .fill(.ultraThinMaterial)
                             }
@@ -313,7 +313,7 @@ struct ImportPhotosView: View {
                     let croppedImage = TransformRenderer.renderTransformedImage(
                         sourceImage: photoData.image,
                         transform: initialTransform,
-                        targetSize: CGSize(width: 1200, height: 1500)
+                        targetSize: CGSize(width: AppConstants.Photo.exportWidth, height: AppConstants.Photo.exportHeight)
                     )
                     
                     // Save the cropped version as the display image

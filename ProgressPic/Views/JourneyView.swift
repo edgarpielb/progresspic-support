@@ -212,7 +212,7 @@ struct JourneyDetailView: View {
     
     var body: some View {
         ZStack {
-            Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+            AppStyle.Colors.bgDark.ignoresSafeArea()
 
             ScrollView {
                 LazyVStack(spacing: 16) {
@@ -583,7 +583,7 @@ struct JourneyDetailView: View {
                 let croppedImage = TransformRenderer.renderTransformedImage(
                     sourceImage: uiImage,
                     transform: initialTransform,
-                    targetSize: CGSize(width: 1200, height: 1500)
+                    targetSize: CGSize(width: AppConstants.Photo.exportWidth, height: AppConstants.Photo.exportHeight)
                 )
                 
                 // Save the cropped version as the display image

@@ -10,8 +10,8 @@ enum PhotoStore {
     private static let imageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         // Limit cache to prevent unbounded memory growth
-        cache.countLimit = 50  // Maximum 50 images in cache
-        cache.totalCostLimit = 100 * 1024 * 1024  // 100 MB total
+        cache.countLimit = AppConstants.Cache.imageCountLimit
+        cache.totalCostLimit = AppConstants.Cache.imageSizeLimit
         return cache
     }()
     
@@ -42,8 +42,8 @@ enum PhotoStore {
     /// This ensures consistent cropping across all photos in the app
     /// Using smaller dimensions to reduce memory usage while maintaining quality
     static func cropTo4x5(_ image: UIImage) -> UIImage {
-        let outW: CGFloat = 1200   // 4:5 canvas (optimized for memory)
-        let outH: CGFloat = 1500
+        let outW = AppConstants.Photo.exportWidth
+        let outH = AppConstants.Photo.exportHeight
         let canvas = CGSize(width: outW, height: outH)
 
         // Calculate scale to fill the canvas (use max to ensure crop fills the frame)

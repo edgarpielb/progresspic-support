@@ -32,9 +32,9 @@ struct ContentView: View {
                 }
                 .tag(2)
         }
-        .background(Color(red: 30/255, green: 32/255, blue: 35/255))
+        .background(AppStyle.Colors.bgDark)
         .accentColor(.white)
-        .toolbarBackground(Color(red: 30/255, green: 32/255, blue: 35/255), for: .tabBar)
+        .toolbarBackground(AppStyle.Colors.bgDark, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .toolbarColorScheme(.dark, for: .tabBar)
         .onAppear {

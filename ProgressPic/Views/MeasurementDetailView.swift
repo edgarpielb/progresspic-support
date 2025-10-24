@@ -129,26 +129,7 @@ struct MeasurementDetailView: View {
                     }
                     
                     // Time Range Selector
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(MeasurementTimeRange.allCases) { range in
-                                Button(action: {
-                                    selectedTimeRange = range
-                                }) {
-                                    Text(range.rawValue)
-                                        .font(.subheadline)
-                                        .foregroundColor(selectedTimeRange == range ? .white : .white.opacity(0.6))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 20)
-                                                .fill(selectedTimeRange == range ? Color.white.opacity(0.2) : Color.white.opacity(0.06))
-                                        )
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
+                    TimeRangeSelector(selectedRange: $selectedTimeRange)
                     
                     // Stats Summary
                     if !filteredEntries.isEmpty {

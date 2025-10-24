@@ -19,7 +19,7 @@ struct TransformRenderer {
             outputSize = CGSize(width: targetSize.width, height: targetSize.width * 5.0 / 4.0)
         } else {
             // Default high-quality output
-            outputSize = CGSize(width: 1200, height: 1500)
+            outputSize = CGSize(width: AppConstants.Photo.exportWidth, height: AppConstants.Photo.exportHeight)
         }
         
         // Default adjust view size (iPhone screen width typically ~390)

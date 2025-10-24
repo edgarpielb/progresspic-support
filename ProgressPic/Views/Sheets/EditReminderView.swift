@@ -38,7 +38,7 @@ struct EditReminderView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                AppStyle.Colors.bgDark.ignoresSafeArea()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {

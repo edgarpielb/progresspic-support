@@ -22,7 +22,7 @@ struct AdjustView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                AppStyle.Colors.bgDark.ignoresSafeArea()
 
                 GeometryReader { geo in
                     let cropW = geo.size.width
@@ -243,7 +243,7 @@ struct AdjustView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     ZStack {
-                        Color(red: 30/255, green: 32/255, blue: 35/255).opacity(0.9)
+                        AppStyle.Colors.bgDark.opacity(0.9)
                         Rectangle()
                             .fill(.ultraThinMaterial)
                     }
@@ -309,7 +309,7 @@ struct AdjustView: View {
         return TransformRenderer.renderTransformedImage(
             sourceImage: captured,
             transform: transform,
-            targetSize: CGSize(width: 1200, height: 1500)
+            targetSize: CGSize(width: AppConstants.Photo.exportWidth, height: AppConstants.Photo.exportHeight)
         )
     }
 

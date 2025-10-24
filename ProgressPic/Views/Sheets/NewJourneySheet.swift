@@ -23,7 +23,7 @@ struct NewJourneySheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                AppStyle.Colors.bgDark.ignoresSafeArea()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -55,57 +55,25 @@ struct NewJourneySheet: View {
                             
                             // Existing reminders
                             ForEach(tempReminders) { reminder in
-                                Button(action: {
-                                    editingReminder = reminder
-                                    showEditReminder = true
-                                }) {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("\(String(format: "%02d", reminder.hour)):\(String(format: "%02d", reminder.minute))")
-                                                .foregroundColor(.white)
-                                                .font(.body)
-                                            Text(formatDays(reminder.daysBitmask))
-                                                .foregroundColor(.gray)
-                                                .font(.caption)
-                                            Text(reminder.notificationText)
-                                                .foregroundColor(.gray)
-                                                .font(.caption2)
-                                                .lineLimit(1)
-                                        }
-                                        Spacer()
-                                        Button(role: .destructive) {
-                                            tempReminders.removeAll { $0.id == reminder.id }
-                                        } label: {
-                                            Image(systemName: "trash")
-                                                .foregroundColor(.red)
-                                        }
-                                        .buttonStyle(.plain)
+                                ReminderListItem(
+                                    hour: reminder.hour,
+                                    minute: reminder.minute,
+                                    daysBitmask: reminder.daysBitmask,
+                                    notificationText: reminder.notificationText,
+                                    onTap: {
+                                        editingReminder = reminder
+                                        showEditReminder = true
+                                    },
+                                    onDelete: {
+                                        tempReminders.removeAll { $0.id == reminder.id }
                                     }
-                                    .padding()
-                                    .background(Color.white.opacity(0.1))
-                                    .cornerRadius(12)
-                                }
-                                .buttonStyle(.plain)
+                                )
                             }
-                            
+
                             // Add reminder button
-                            Button(action: {
+                            AddReminderButton {
                                 editingReminder = nil
                                 showEditReminder = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "plus")
-                                        .font(.title2)
-                                        .foregroundColor(.gray)
-                                    Text("Add Reminder")
-                                        .font(.headline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.gray)
-                                    Spacer()
-                                }
-                                .padding()
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(12)
                             }
                         }
                         
@@ -224,28 +192,6 @@ struct NewJourneySheet: View {
         }
     }
     
-    func formatDays(_ bitmask: Int) -> String {
-        var selectedDays: Set<Int> = []
-        for day in 1...7 {
-            if bitmask & (1 << (day - 1)) != 0 {
-                selectedDays.insert(day)
-            }
-        }
-        
-        let sortedDays = Array(selectedDays).sorted()
-        
-        if sortedDays == [1, 2, 3, 4, 5, 6, 7] {
-            return "Every Day"
-        } else if sortedDays == [1, 2, 3, 4, 5] {
-            return "Weekdays"
-        } else if sortedDays == [6, 7] {
-            return "Weekends"
-        } else {
-            let dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            let selectedDayNames = sortedDays.map { dayNames[$0 - 1] }
-            return selectedDayNames.joined(separator: ", ")
-        }
-    }
 }
 
 // Simplified EditReminderView for NewJourneySheet (before journey exists)
@@ -287,7 +233,7 @@ struct NewJourneyEditReminderView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 30/255, green: 32/255, blue: 35/255).ignoresSafeArea()
+                AppStyle.Colors.bgDark.ignoresSafeArea()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
