@@ -49,7 +49,7 @@ struct ContentView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                print("⚠️ App-wide memory warning - clearing image cache")
+                AppConstants.Log.app.debug("⚠️ App-wide memory warning - clearing image cache")
                 PhotoStore.clearCache()
             }
         }
@@ -63,26 +63,26 @@ struct ContentView: View {
 
                 // Start camera if not running
                 if cameraService.isAuthorized && !cameraService.session.isRunning {
-                    print("▶️ Switching to camera tab - starting camera")
+                    AppConstants.Log.app.debug("▶️ Switching to camera tab - starting camera")
                     cameraService.start()
                 }
             } else if oldTab == 1 {
                 // Switching AWAY FROM camera tab
                 // Schedule camera stop after 5 seconds (balance between UX and battery)
                 // Short delay makes returns feel instant, but stops soon enough to save battery
-                print("⏸️ Switching away from camera tab - scheduling stop in 5 seconds")
+                AppConstants.Log.app.debug("⏸️ Switching away from camera tab - scheduling stop in 5 seconds")
                 cameraStopTask?.cancel()
                 cameraStopTask = Task {
                     try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
 
                     // Check if task was cancelled (user returned to camera tab)
                     guard !Task.isCancelled else {
-                        print("✅ Camera stop cancelled - user returned to camera tab")
+                        AppConstants.Log.app.debug("✅ Camera stop cancelled - user returned to camera tab")
                         return
                     }
 
                     await MainActor.run {
-                        print("⏸️ Stopping camera after 5-second delay")
+                        AppConstants.Log.app.debug("⏸️ Stopping camera after 5-second delay")
                         cameraService.stop()
                     }
                 }
@@ -91,13 +91,13 @@ struct ContentView: View {
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Always stop camera when app goes to background
             if newPhase == .background {
-                print("📱 App entering background - stopping camera immediately")
+                AppConstants.Log.app.debug("📱 App entering background - stopping camera immediately")
                 cameraStopTask?.cancel()
                 cameraService.stop()
             } else if newPhase == .active && selectedTab == 1 {
                 // Restart camera if we're on camera tab and app becomes active
                 if cameraService.isAuthorized && !cameraService.session.isRunning {
-                    print("📱 App becoming active on camera tab - starting camera")
+                    AppConstants.Log.app.debug("📱 App becoming active on camera tab - starting camera")
                     cameraService.start()
                 }
             }
@@ -130,9 +130,9 @@ struct ContentView: View {
             
             if fixedCount > 0 {
                 try modelContext.save()
-                print("🔧 Fixed \(fixedCount) orphaned photos")
+                AppConstants.Log.app.debug("🔧 Fixed \(fixedCount) orphaned photos")
             } else {
-                print("✅ No orphaned photos found")
+                AppConstants.Log.app.debug("✅ No orphaned photos found")
             }
         } catch {
             print("⚠️ Failed to fix orphaned photos: \(error)")

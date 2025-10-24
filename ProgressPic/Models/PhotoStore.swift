@@ -26,7 +26,7 @@ enum PhotoStore {
     /// Clear the image cache (useful for memory warnings or testing)
     static func clearCache() {
         imageCache.removeAllObjects()
-        print("🗑️ Cleared image cache")
+        AppConstants.Log.photo.info("Cleared image cache")
     }
     
     static func requestAuthorization() async -> Bool {
@@ -69,23 +69,26 @@ enum PhotoStore {
     }
 
     static func saveToAppDirectory(_ image: UIImage) async throws -> String {
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let photosDirectory = documentsPath.appendingPathComponent("Photos")
+        // Move heavy I/O operations off main thread
+        return try await Task.detached(priority: .userInitiated) {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let photosDirectory = documentsPath.appendingPathComponent("Photos")
 
-        // Create Photos directory if it doesn't exist
-        try FileManager.default.createDirectory(at: photosDirectory, withIntermediateDirectories: true, attributes: nil)
+            // Create Photos directory if it doesn't exist
+            try FileManager.default.createDirectory(at: photosDirectory, withIntermediateDirectories: true, attributes: nil)
 
-        // Generate unique filename
-        let filename = UUID().uuidString + ".jpg"
-        let fileURL = photosDirectory.appendingPathComponent(filename)
+            // Generate unique filename
+            let filename = UUID().uuidString + ".jpg"
+            let fileURL = photosDirectory.appendingPathComponent(filename)
 
-        // Save image as JPEG
-        guard let jpegData = image.jpegData(compressionQuality: 0.9) else {
-            throw NSError(domain: "PhotoStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not convert image to JPEG"])
-        }
+            // Save image as JPEG (expensive operation - now off main thread)
+            guard let jpegData = image.jpegData(compressionQuality: 0.9) else {
+                throw NSError(domain: "PhotoStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not convert image to JPEG"])
+            }
 
-        try jpegData.write(to: fileURL)
-        return filename // Return just the filename, not the full path
+            try jpegData.write(to: fileURL)
+            return filename // Return just the filename, not the full path
+        }.value
     }
 
     static func saveToLibrary(_ image: UIImage) async throws -> String {
@@ -122,9 +125,9 @@ enum PhotoStore {
         // Delete the file
         if FileManager.default.fileExists(atPath: fileURL.path) {
             try FileManager.default.removeItem(at: fileURL)
-            print("🗑️ Deleted photo file: \(localId)")
+            AppConstants.Log.photo.debug("Deleted photo file: \(localId)")
         } else {
-            print("⚠️ Photo file not found: \(localId)")
+            AppConstants.Log.photo.warning("Photo file not found: \(localId)")
         }
     }
 
@@ -132,15 +135,15 @@ enum PhotoStore {
         // Check cache first
         let key = cacheKey(for: localId, targetSize: targetSize)
         if let cachedImage = imageCache.object(forKey: key as NSString) {
-            print("✅ Cache hit for: \(localId) (\(targetSize != nil ? "\(Int(targetSize!.width))x\(Int(targetSize!.height))" : "full"))")
+            AppConstants.Log.photo.debug("Cache hit for: \(localId)")
             return cachedImage
         }
-        
+
         // First try to load from app directory (new method)
         if let image = loadFromAppDirectory(filename: localId, targetSize: targetSize) {
             // Cache the loaded image
             imageCache.setObject(image, forKey: key as NSString)
-            print("💾 Cached image: \(localId) (\(targetSize != nil ? "\(Int(targetSize!.width))x\(Int(targetSize!.height))" : "full"))")
+            AppConstants.Log.photo.debug("Cached image: \(localId)")
             return image
         }
         
@@ -148,7 +151,7 @@ enum PhotoStore {
         if let image = await loadFromPhotoLibrary(localId: localId, targetSize: targetSize) {
             // Cache the loaded image
             imageCache.setObject(image, forKey: key as NSString)
-            print("💾 Cached image from library: \(localId)")
+            AppConstants.Log.photo.debug("Cached image from library: \(localId)")
             return image
         }
         
@@ -175,13 +178,13 @@ enum PhotoStore {
     private static func downsampleImage(at imageURL: URL, to targetSize: CGSize) -> UIImage? {
         let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let imageSource = CGImageSourceCreateWithURL(imageURL as CFURL, imageSourceOptions) else {
-            print("⚠️ Failed to create image source for: \(imageURL.lastPathComponent)")
+            AppConstants.Log.photo.warning("Failed to create image source for: \(imageURL.lastPathComponent)")
             return nil
         }
-        
+
         // Calculate the maximum dimension
         let maxDimensionInPixels = max(targetSize.width, targetSize.height)
-        
+
         // Create thumbnail options
         let downsampleOptions = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -189,14 +192,14 @@ enum PhotoStore {
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxDimensionInPixels
         ] as CFDictionary
-        
+
         // Generate the thumbnail
         guard let downsampledImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions) else {
-            print("⚠️ Failed to create thumbnail for: \(imageURL.lastPathComponent)")
+            AppConstants.Log.photo.warning("Failed to create thumbnail for: \(imageURL.lastPathComponent)")
             // Fallback to standard loading
             return UIImage(contentsOfFile: imageURL.path)
         }
-        
+
         return UIImage(cgImage: downsampledImage)
     }
     
@@ -283,7 +286,7 @@ enum PhotoStore {
                 let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
                 return attributes[.creationDate] as? Date
             } catch {
-                print("Error getting file creation date: \(error)")
+                AppConstants.Log.photo.error("Error getting file creation date: \(error.localizedDescription)")
             }
         }
         
@@ -306,7 +309,7 @@ enum PhotoStore {
                 // Try to extract EXIF from image data
                 if let data = imageData,
                    let date = extractEXIFDate(from: data) {
-                    print("✅ Successfully extracted EXIF date: \(date)")
+                    AppConstants.Log.photo.debug("Successfully extracted EXIF date: \(date)")
                     continuation.resume(returning: date)
                     return
                 }
@@ -319,13 +322,13 @@ enum PhotoStore {
                     if let url = input?.fullSizeImageURL,
                        let data = try? Data(contentsOf: url),
                        let date = extractEXIFDate(from: data) {
-                        print("✅ Successfully extracted EXIF date from editing input: \(date)")
+                        AppConstants.Log.photo.debug("Successfully extracted EXIF date from editing input: \(date)")
                         continuation.resume(returning: date)
                         return
                     }
 
                     // Final fallback: use PHAsset creationDate
-                    print("⚠️ Could not extract EXIF date, using PHAsset.creationDate")
+                    AppConstants.Log.photo.warning("Could not extract EXIF date, using PHAsset.creationDate")
                     continuation.resume(returning: asset.creationDate)
                 }
             }
@@ -388,7 +391,7 @@ enum PhotoStore {
     static func extractDateFromUIImage(_ image: UIImage) -> Date? {
         // Try to get image data from the UIImage
         guard let imageData = image.jpegData(compressionQuality: 1.0) else {
-            print("⚠️ Could not convert UIImage to JPEG data")
+            AppConstants.Log.photo.warning("Could not convert UIImage to JPEG data")
             return nil
         }
 

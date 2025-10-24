@@ -7,9 +7,24 @@
 
 import Foundation
 import CoreGraphics
+import OSLog
 
 /// Centralized constants used throughout the ProgressPic app
 enum AppConstants {
+
+    // MARK: - Logging
+    enum Log {
+        /// Main app logger for general logging
+        static let app = Logger(subsystem: "com.progresspic", category: "app")
+        /// Photo-related operations (loading, saving, caching)
+        static let photo = Logger(subsystem: "com.progresspic", category: "photo")
+        /// Camera operations and capture
+        static let camera = Logger(subsystem: "com.progresspic", category: "camera")
+        /// Data persistence and SwiftData operations
+        static let data = Logger(subsystem: "com.progresspic", category: "data")
+        /// HealthKit integration
+        static let health = Logger(subsystem: "com.progresspic", category: "health")
+    }
 
     // MARK: - Cache Configuration
     enum Cache {

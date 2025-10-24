@@ -37,11 +37,12 @@ final class Journey {
     var id: UUID = UUID()
     var name: String = ""
     var createdAt: Date = Date.now
-    var coverAssetLocalId: String? = nil   // PHAsset localIdentifier
+    // Note: coverAssetLocalId removed - journey covers determined by most recent photos
     var saveToCameraRoll: Bool = false
     var autoSyncStartDate: Bool = true  // Auto-sync start date with first photo
     var template: String? = nil
     var sortOrder: Int = 0  // For manual reordering
+    var photoCount: Int = 0  // Cached count to avoid materializing photos relationship
 
     @Relationship(deleteRule: .cascade, inverse: \ProgressPhoto.journey) var photos: [ProgressPhoto]? = []
     @Relationship(deleteRule: .cascade, inverse: \MeasurementEntry.journey) var measurements: [MeasurementEntry]? = []
@@ -60,6 +61,7 @@ final class Journey {
         self.autoSyncStartDate = autoSyncStartDate
         self.template = template
         self.sortOrder = sortOrder
+        self.photoCount = 0
     }
 }
 

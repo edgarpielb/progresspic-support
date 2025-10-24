@@ -39,9 +39,8 @@ struct JourneysView: View {
                                         .font(.title3.bold())
                                         .foregroundColor(.white)
 
-                                    let count = j.photos?.count ?? 0
                                     HStack(spacing: 12) {
-                                        Text("\(count) photos")
+                                        Text("\(j.photoCount) photos")
                                             .font(.subheadline)
                                             .foregroundStyle(.white.opacity(0.7))
                                         Text("•")
@@ -602,6 +601,7 @@ struct JourneyDetailView: View {
                     )
                     progressPhoto.journey = journey
                     ctx.insert(progressPhoto)
+                    journey.photoCount += 1  // Increment cached count
 
                     // Save context periodically
                     if index % 5 == 0 {
@@ -619,6 +619,12 @@ struct JourneyDetailView: View {
             } catch {
                 errorCount += 1
                 print("❌ Error importing photo \(index + 1): \(error)")
+            }
+
+            // Process in smaller batches to reduce memory pressure
+            if index % 10 == 0 {
+                // Allow system to reclaim memory between batches
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
         

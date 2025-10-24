@@ -324,7 +324,7 @@ struct CameraHostView: View {
         }
         .background(AppStyle.Colors.bgDark)
         .onAppear {
-            print("👁️ CameraHostView appeared")
+            AppConstants.Log.camera.debug("👁️ CameraHostView appeared")
 
             // Initialize camera when view appears
             Task {
@@ -336,14 +336,14 @@ struct CameraHostView: View {
 
                 // Request camera permission if needed (first time only)
                 if !camera.isAuthorized {
-                    print("🔐 Requesting camera permission...")
+                    AppConstants.Log.camera.debug("🔐 Requesting camera permission...")
                     await camera.requestPermissionIfNeeded()
                 }
 
                 // Start camera session if authorized and not already running
                 // This handles initial app launch on camera tab
                 if camera.isAuthorized && !camera.session.isRunning {
-                    print("▶️ Starting camera session on appear...")
+                    AppConstants.Log.camera.debug("▶️ Starting camera session on appear...")
                     camera.start()
                 }
 
@@ -374,7 +374,7 @@ struct CameraHostView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                print("📱 App entered background, releasing ghost image")
+                AppConstants.Log.camera.debug("📱 App entered background, releasing ghost image")
                 ghostLoadTask?.cancel()
                 lastGhost = nil
             }
@@ -385,7 +385,7 @@ struct CameraHostView: View {
                 object: nil,
                 queue: .main
             ) { _ in
-                print("⚠️ Memory warning received, clearing image cache")
+                AppConstants.Log.camera.debug("⚠️ Memory warning received, clearing image cache")
                 PhotoStore.clearCache()
                 // Also release ghost if not actively visible
                 if !ghostEnabled {
@@ -420,7 +420,7 @@ struct CameraHostView: View {
             }
         }
         .onDisappear {
-            print("👋 CameraHostView disappeared - clearing resources")
+            AppConstants.Log.camera.debug("👋 CameraHostView disappeared - clearing resources")
 
             // Cancel any ongoing ghost load
             ghostLoadTask?.cancel()
@@ -448,7 +448,7 @@ struct CameraHostView: View {
         .onChange(of: camera.isAuthorized) { _, ok in
             // Camera start is handled in onAppear task
             // This prevents duplicate start calls
-            print("📹 Camera authorization changed: \(ok)")
+            AppConstants.Log.camera.debug("📹 Camera authorization changed: \(ok)")
         }
         .onChange(of: selectedJourney) { _, newJourney in
             // Fetch photos when journey changes - do it async to avoid blocking UI during menu interaction
@@ -479,7 +479,7 @@ struct CameraHostView: View {
         .onChange(of: camera.latestPhoto) { _, newPhoto in
             // Reactively show adjust view when photo is captured
             if newPhoto != nil {
-                print("✅ Photo captured, showing adjust view")
+                AppConstants.Log.camera.debug("✅ Photo captured, showing adjust view")
                 showAdjust = true
             }
         }
@@ -491,14 +491,15 @@ struct CameraHostView: View {
                         let p = ProgressPhoto(journeyId: journey.id, date: date, assetLocalId: savedId, isFrontCamera: camera.isFront, alignTransform: transform, originalAssetLocalId: originalId)
                         p.journey = journey  // Set the relationship
                         ctx.insert(p)
-                        if journey.coverAssetLocalId == nil { journey.coverAssetLocalId = savedId }
-                        
+                        journey.photoCount += 1  // Increment cached count
+                        // Note: coverAssetLocalId is deprecated and unused
+
                         // Save context and handle errors
                         do {
                             try ctx.save()
-                            print("✅ Photo saved to SwiftData")
+                            AppConstants.Log.camera.debug("✅ Photo saved to SwiftData")
                         } catch {
-                            print("❌ Error saving photo: \(error)")
+                            AppConstants.Log.camera.debug("❌ Error saving photo: \(error)")
                             errorMessage = "Failed to save photo: \(error.localizedDescription)"
                             showErrorAlert = true
                         }
@@ -508,14 +509,14 @@ struct CameraHostView: View {
                         
                         // Clear latestPhoto to free memory and prepare for next capture
                         camera.latestPhoto = nil
-                        print("🧹 Cleared latestPhoto after save")
+                        AppConstants.Log.camera.debug("🧹 Cleared latestPhoto after save")
                         
                         // Refresh ghost and thumbnail to show the newly captured photo
                         Task {
                             await loadLatestThumbnail()
                         }
                         startLoadingGhost()
-                        print("🔄 Refreshed ghost and thumbnail after capture")
+                        AppConstants.Log.camera.debug("🔄 Refreshed ghost and thumbnail after capture")
                     }
                 })
             }
@@ -553,9 +554,9 @@ struct CameraHostView: View {
         
         do {
             photos = try ctx.fetch(descriptor)
-            print("📸 Fetched \(photos.count) photos for journey: \(selectedJourney?.name ?? "unknown")")
+            AppConstants.Log.camera.debug("📸 Fetched \(photos.count) photos for journey: \(selectedJourney?.name ?? "unknown")")
         } catch {
-            print("❌ Error fetching photos: \(error)")
+            AppConstants.Log.camera.debug("❌ Error fetching photos: \(error)")
             photos = []
         }
     }
@@ -584,11 +585,11 @@ struct CameraHostView: View {
             height: screenSize.height * scale
         )
         
-        print("👻 Loading ghost image at target size: \(Int(targetSize.width))x\(Int(targetSize.height))")
+        AppConstants.Log.camera.debug("Loading ghost image at target size: \(Int(targetSize.width))x\(Int(targetSize.height))")
         
         // Check if task was cancelled before loading
         guard !Task.isCancelled else {
-            print("👻 Ghost load cancelled")
+            AppConstants.Log.camera.debug("Ghost load cancelled")
             return
         }
         
@@ -596,17 +597,17 @@ struct CameraHostView: View {
             // Always load from assetLocalId for display (already transformed)
             if let image = await PhotoStore.fetchUIImage(localId: first.assetLocalId, targetSize: targetSize) {
                 lastGhost = image
-                print("👻 Loaded first photo as ghost")
+                AppConstants.Log.camera.debug("Loaded first photo as ghost")
             }
         } else if let last = photos.last {
             // Always load from assetLocalId for display (already transformed)
             if let image = await PhotoStore.fetchUIImage(localId: last.assetLocalId, targetSize: targetSize) {
                 lastGhost = image
-                print("👻 Loaded last photo as ghost")
+                AppConstants.Log.camera.debug("Loaded last photo as ghost")
             }
         } else {
             lastGhost = nil
-            print("👻 No photos available for ghost")
+            AppConstants.Log.camera.debug("No photos available for ghost")
         }
     }
     
@@ -621,11 +622,11 @@ struct CameraHostView: View {
     
     func toggleFlash() {
         camera.flashMode = camera.flashMode == .off ? .on : .off
-        print("💡 Flash toggled to: \(camera.flashMode == .on ? "ON" : "OFF")")
+        AppConstants.Log.camera.debug("💡 Flash toggled to: \(camera.flashMode == .on ? "ON" : "OFF")")
     }
     
     func toggleGhostMode() {
-        print("👻 Ghost mode toggled: \(ghostEnabled) -> \(!ghostEnabled)")
+        AppConstants.Log.camera.debug("👻 Ghost mode toggled: \(ghostEnabled) -> \(!ghostEnabled)")
         ghostEnabled.toggle()
         if ghostEnabled {
             showGhostControls = true
@@ -649,7 +650,7 @@ struct CameraHostView: View {
     }
     
     func selectZoomLevel(_ level: CGFloat) {
-        print("🎯 User selected zoom level: \(level)x")
+        AppConstants.Log.camera.debug("🎯 User selected zoom level: \(level)x")
         
         // Update UI immediately
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -661,7 +662,7 @@ struct CameraHostView: View {
     }
     
     func capturePhoto() {
-        print("📸 Capture button pressed")
+        AppConstants.Log.camera.debug("📸 Capture button pressed")
         camera.capturePhoto()
         // Note: showAdjust will be triggered by onChange(of: camera.latestPhoto)
     }
@@ -828,7 +829,7 @@ struct CameraPreviewLayerView: UIViewRepresentable {
                     }
                 }
             } catch {
-                print("❌ Zoom error: \(error)")
+                AppConstants.Log.camera.debug("❌ Zoom error: \(error)")
             }
         }
     }
@@ -847,13 +848,13 @@ struct CameraPreviewLayerView: UIViewRepresentable {
         
         // Remove old layers only if there are any
         if !layersToRemove.isEmpty {
-            print("🧹 Removing \(layersToRemove.count) old preview layer(s)")
+            AppConstants.Log.camera.debug("🧹 Removing \(layersToRemove.count) old preview layer(s)")
             layersToRemove.forEach { $0.removeFromSuperlayer() }
         }
 
         // Add or update the preview layer
         if previewLayer.superlayer !== uiView.layer {
-            print("➕ Adding preview layer to view hierarchy")
+            AppConstants.Log.camera.debug("➕ Adding preview layer to view hierarchy")
             previewLayer.videoGravity = .resizeAspectFill
             previewLayer.frame = uiView.bounds
             uiView.layer.insertSublayer(previewLayer, at: 0) // Insert at bottom

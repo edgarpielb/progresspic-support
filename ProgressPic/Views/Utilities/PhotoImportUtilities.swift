@@ -329,10 +329,11 @@ struct ImportPhotosView: View {
                         originalAssetLocalId: originalId  // Keep original for re-editing
                     )
                     progressPhoto.journey = journey  // Set the relationship
-                    
+
                     await MainActor.run {
                         ctx.insert(progressPhoto)
-                        
+                        journey.photoCount += 1  // Increment cached count
+
                         // Save context periodically to prevent memory issues
                         if index % 5 == 0 {
                             do {
@@ -345,10 +346,16 @@ struct ImportPhotosView: View {
                     
                     successCount += 1
                     print("✅ Successfully imported photo \(index + 1)/\(selectedPhotoData.count)")
-                    
+
                 } catch {
                     errorCount += 1
                     print("❌ Error importing photo \(index + 1): \(error)")
+                }
+
+                // Process in smaller batches to reduce memory pressure
+                if index % 10 == 0 {
+                    // Allow system to reclaim memory between batches
+                    try? await Task.sleep(for: .milliseconds(100))
                 }
             }
             

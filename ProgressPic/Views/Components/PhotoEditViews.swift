@@ -482,6 +482,9 @@ struct PhotoEditSheet: View {
     
     private func deletePhoto() {
         let photoToDelete = currentPhoto
+        if let journey = currentPhoto.journey {
+            journey.photoCount = max(0, journey.photoCount - 1)  // Decrement cached count
+        }
         ctx.delete(currentPhoto)
         try? ctx.save()
 

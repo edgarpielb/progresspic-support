@@ -169,8 +169,9 @@ class CameraViewModel: ObservableObject {
     }
 
     nonisolated deinit {
-        Task { @MainActor in
-            cleanup()
+        // Capture self weakly to avoid warning about outliving deinit
+        Task { @MainActor [weak self] in
+            self?.cleanup()
         }
     }
 }

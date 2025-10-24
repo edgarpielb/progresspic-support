@@ -31,27 +31,27 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     @MainActor
     private func requestCameraPermission() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
-        print("📹 Camera permission status: \(status)")
+        AppConstants.Log.camera.debug("Camera permission status: \(status.rawValue)")
         
         switch status {
         case .authorized:
-            print("✅ Camera already authorized")
+            AppConstants.Log.camera.info("Camera already authorized")
             isAuthorized = true
             // Don't configure here - let start() handle it
         case .notDetermined:
-            print("❓ Requesting camera permission...")
+            AppConstants.Log.camera.info("Requesting camera permission...")
             let granted = await AVCaptureDevice.requestAccess(for: .video)
-            print("📹 Camera permission granted: \(granted)")
+            AppConstants.Log.camera.info("Camera permission granted: \(granted)")
             isAuthorized = granted
             // Don't configure here - let start() handle it
         case .denied:
-            print("❌ Camera permission denied")
+            AppConstants.Log.camera.warning("Camera permission denied")
             isAuthorized = false
         case .restricted:
-            print("🚫 Camera access restricted")
+            AppConstants.Log.camera.warning("Camera access restricted")
             isAuthorized = false
         @unknown default:
-            print("❓ Unknown camera permission status")
+            AppConstants.Log.camera.warning("Unknown camera permission status")
             isAuthorized = false
         }
     }
@@ -77,12 +77,12 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         if connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = isFrontCamera
-            print("🔄 Video mirroring set to: \(isFrontCamera ? "ON (front camera)" : "OFF (back camera)")")
+            AppConstants.Log.camera.debug("🔄 Video mirroring set to: \(isFrontCamera ? "ON (front camera)" : "OFF (back camera)")")
         }
     }
 
     func configureSession(front: Bool) {
-        print("🔧 Configuring camera session (front: \(front))...")
+        AppConstants.Log.camera.debug("🔧 Configuring camera session (front: \(front))...")
         
         DispatchQueue.global(qos: .userInitiated).async {
             self.session.beginConfiguration()
@@ -90,14 +90,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             
             // Remove existing inputs
             self.session.inputs.forEach { self.session.removeInput($0) }
-            print("🗑️ Removed existing inputs")
+            AppConstants.Log.camera.debug("🗑️ Removed existing inputs")
             
             // Check for ultra-wide camera availability (only on back)
             if !front {
                 let ultraWide = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
                 DispatchQueue.main.async {
                     self.hasUltraWideCamera = ultraWide != nil
-                    print("📷 Ultra-wide camera available: \(ultraWide != nil)")
+                    AppConstants.Log.camera.debug("📷 Ultra-wide camera available: \(ultraWide != nil)")
                 }
             } else {
                 DispatchQueue.main.async {
@@ -107,34 +107,34 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             
             // Add camera input - start with wide angle camera
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: front ? .front : .back) else {
-                print("❌ Could not find camera device")
+                AppConstants.Log.camera.debug("❌ Could not find camera device")
                 self.session.commitConfiguration()
                 return
             }
             
-            print("📷 Found camera device: \(device.localizedName)")
+            AppConstants.Log.camera.debug("📷 Found camera device: \(device.localizedName)")
             
             do {
                 let input = try AVCaptureDeviceInput(device: device)
                 if self.session.canAddInput(input) {
                     self.session.addInput(input)
                     self.currentDevice = device  // Keep track of current device
-                    print("✅ Added camera input")
+                    AppConstants.Log.camera.debug("✅ Added camera input")
                 } else {
-                    print("❌ Cannot add camera input")
+                    AppConstants.Log.camera.debug("❌ Cannot add camera input")
                 }
             } catch {
-                print("❌ Error creating camera input: \(error)")
+                AppConstants.Log.camera.debug("❌ Error creating camera input: \(error)")
             }
             
             // Add photo output if not already added
             if !self.session.outputs.contains(self.output) && self.session.canAddOutput(self.output) {
                 self.session.addOutput(self.output)
-                print("✅ Added photo output")
+                AppConstants.Log.camera.debug("✅ Added photo output")
             }
             
             self.session.commitConfiguration()
-            print("✅ Session configuration complete")
+            AppConstants.Log.camera.debug("✅ Session configuration complete")
 
             // DON'T start here - let start() method handle it
             // This prevents race conditions and multiple startRunning calls
@@ -149,8 +149,8 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                     self.previewLayer?.session = self.session
                 }
                 
-                print("📹 Session inputs: \(self.session.inputs.count)")
-                print("📹 Session outputs: \(self.session.outputs.count)")
+                AppConstants.Log.camera.debug("📹 Session inputs: \(self.session.inputs.count)")
+                AppConstants.Log.camera.debug("📹 Session outputs: \(self.session.outputs.count)")
 
                 // Wait a moment for the connection to be ready, then set orientation
                 // Pass the front parameter explicitly to ensure correct orientation
@@ -167,10 +167,10 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     private func startSessionAfterConfiguration() {
         DispatchQueue.global(qos: .userInitiated).async {
             if !self.session.isRunning {
-                print("🎥 Starting camera session after configuration...")
+                AppConstants.Log.camera.debug("🎥 Starting camera session after configuration...")
                 self.session.startRunning()
                 DispatchQueue.main.async {
-                    print("📹 Camera session started: \(self.session.isRunning)")
+                    AppConstants.Log.camera.debug("📹 Camera session started: \(self.session.isRunning)")
                     self.updateCaptureReadiness()
                 }
             }
@@ -179,22 +179,22 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
 
     func start() {
         guard isAuthorized else {
-            print("❌ Camera not authorized - cannot start")
+            AppConstants.Log.camera.debug("❌ Camera not authorized - cannot start")
             return
         }
 
-        print("🎥 Start called - configuring and starting session...")
+        AppConstants.Log.camera.debug("🎥 Start called - configuring and starting session...")
 
         // Configure session first if not configured (no inputs)
         if session.inputs.isEmpty {
-            print("📹 No inputs - configuring session first")
+            AppConstants.Log.camera.debug("📹 No inputs - configuring session first")
             configureSession(front: isFront)
             // configureSession will start the session automatically
         } else if !session.isRunning {
             // Session configured but not running - just start it
             startSessionAfterConfiguration()
         } else {
-            print("📹 Camera session already running")
+            AppConstants.Log.camera.debug("📹 Camera session already running")
             DispatchQueue.main.async {
                 self.updateCaptureReadiness()
             }
@@ -205,7 +205,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         // Only stop if we're not on camera tab and session is running
         DispatchQueue.global(qos: .userInitiated).async {
             if self.session.isRunning {
-                print("⏸️ Stopping camera session - not needed")
+                AppConstants.Log.camera.debug("⏸️ Stopping camera session - not needed")
                 self.session.stopRunning()
                 DispatchQueue.main.async {
                     self.canCapture = false
@@ -224,7 +224,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     
     @MainActor
     func cleanup() {
-        print("🧹 Cleaning up camera resources")
+        AppConstants.Log.camera.debug("🧹 Cleaning up camera resources")
         // Remove preview layer from superlayer
         previewLayer?.removeFromSuperlayer()
         previewLayer = nil
@@ -234,7 +234,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async {
             if self.session.isRunning {
                 self.session.stopRunning()
-                print("🛑 Camera session stopped and cleaned up")
+                AppConstants.Log.camera.debug("🛑 Camera session stopped and cleaned up")
             }
         }
     }
@@ -242,12 +242,12 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     func flip() {
         let oldValue = isFront
         let newValue = !isFront
-        print("🔄 Flipping camera (front: \(oldValue) -> \(newValue))")
+        AppConstants.Log.camera.debug("🔄 Flipping camera (front: \(oldValue) -> \(newValue))")
 
         // Stop session before reconfiguring to prevent race conditions
         DispatchQueue.global(qos: .userInitiated).async {
             if self.session.isRunning {
-                print("⏸️ Stopping session before flip")
+                AppConstants.Log.camera.debug("⏸️ Stopping session before flip")
                 self.session.stopRunning()
             }
 
@@ -269,7 +269,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                 let currentSession = self.session
                 self.previewLayer?.session = nil
                 self.previewLayer?.session = currentSession
-                print("🔄 Preview layer rebound to session")
+                AppConstants.Log.camera.debug("🔄 Preview layer rebound to session")
             }
         }
     }
@@ -285,7 +285,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         @unknown default:
             flashMode = .off
         }
-        print("💡 Flash mode: \(flashMode.rawValue)")
+        AppConstants.Log.camera.debug("💡 Flash mode: \(self.flashMode.rawValue)")
     }
     
     func zoomIn() {
@@ -302,9 +302,9 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                 self.currentZoom = newZoom
                 self.maxZoom = deviceMaxZoom
             }
-            print("🔍 Zoom in: \(newZoom)x")
+            AppConstants.Log.camera.debug("🔍 Zoom in: \(newZoom)x")
         } catch {
-            print("❌ Zoom error: \(error)")
+            AppConstants.Log.camera.debug("❌ Zoom error: \(error)")
         }
     }
     
@@ -320,20 +320,20 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             DispatchQueue.main.async {
                 self.currentZoom = newZoom
             }
-            print("🔍 Zoom out: \(newZoom)x")
+            AppConstants.Log.camera.debug("🔍 Zoom out: \(newZoom)x")
         } catch {
-            print("❌ Zoom error: \(error)")
+            AppConstants.Log.camera.debug("❌ Zoom error: \(error)")
         }
     }
     
     private var isSwitchingCamera = false
     
     func setZoom(_ level: CGFloat) {
-        print("🔍 Setting zoom to: \(level)x")
+        AppConstants.Log.camera.debug("🔍 Setting zoom to: \(level)x")
         
         // Prevent multiple simultaneous switches
         guard !isSwitchingCamera else {
-            print("⚠️ Camera switch already in progress")
+            AppConstants.Log.camera.debug("⚠️ Camera switch already in progress")
             return
         }
         
@@ -351,7 +351,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         // Reset the flag after a timeout to prevent getting stuck
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             if self.isSwitchingCamera {
-                print("⚠️ Camera switch timeout - resetting flag")
+                AppConstants.Log.camera.debug("⚠️ Camera switch timeout - resetting flag")
                 self.isSwitchingCamera = false
             }
         }
@@ -362,14 +362,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         let currentDevice = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device }).first
         let currentType = currentDevice?.deviceType
         
-        print("📷 Current camera: \(currentType?.rawValue ?? "none"), target: \(type.rawValue), zoom: \(targetZoom)x")
+        AppConstants.Log.camera.debug("📷 Current camera: \(currentType?.rawValue ?? "none"), target: \(type.rawValue), zoom: \(targetZoom)x")
         
         // If already on the right camera, just adjust zoom
         if currentType == type {
-            print("📷 Already on \(type.rawValue), adjusting zoom to \(targetZoom)x")
+            AppConstants.Log.camera.debug("📷 Already on \(type.rawValue), adjusting zoom to \(targetZoom)x")
             
             guard let device = currentDevice else {
-                print("❌ No current device found")
+                AppConstants.Log.camera.debug("❌ No current device found")
                 isSwitchingCamera = false
                 return
             }
@@ -388,20 +388,20 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.async {
                     self.currentZoom = targetZoom
                     self.isSwitchingCamera = false
-                    print("✅ Zoom updated to \(targetZoom)x on \(type.rawValue)")
+                    AppConstants.Log.camera.debug("✅ Zoom updated to \(targetZoom)x on \(type.rawValue)")
                 }
             } catch {
-                print("❌ Error adjusting zoom: \(error)")
+                AppConstants.Log.camera.debug("❌ Error adjusting zoom: \(error)")
                 isSwitchingCamera = false
             }
             return
         }
         
         // Need to switch cameras
-        print("🔄 Switching from \(currentType?.rawValue ?? "none") to \(type.rawValue)")
+        AppConstants.Log.camera.debug("🔄 Switching from \(currentType?.rawValue ?? "none") to \(type.rawValue)")
         
         guard let newDevice = AVCaptureDevice.default(type, for: .video, position: .back) else {
-            print("❌ Camera type \(type.rawValue) not available")
+            AppConstants.Log.camera.debug("❌ Camera type \(type.rawValue) not available")
             isSwitchingCamera = false
             return
         }
@@ -412,14 +412,14 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
             
             // Remove ALL current inputs
             let inputs = self.session.inputs
-            print("🗑️ Removing \(inputs.count) input(s)")
+            AppConstants.Log.camera.debug("🗑️ Removing \(inputs.count) input(s)")
             for input in inputs {
                 self.session.removeInput(input)
             }
             
             // Make sure output is still connected
             if !self.session.outputs.contains(self.output) {
-                print("⚠️ Photo output not in session, re-adding it")
+                AppConstants.Log.camera.debug("⚠️ Photo output not in session, re-adding it")
                 if self.session.canAddOutput(self.output) {
                     self.session.addOutput(self.output)
                 }
@@ -435,26 +435,26 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                     try newDevice.lockForConfiguration()
                     if type == .builtInUltraWideCamera {
                         newDevice.videoZoomFactor = 1.0
-                        print("📷 Ultra-wide zoom set to 1.0 (represents 0.5x)")
+                        AppConstants.Log.camera.debug("📷 Ultra-wide zoom set to 1.0 (represents 0.5x)")
                     } else {
                         let deviceMaxZoom = min(newDevice.activeFormat.videoMaxZoomFactor, 5.0)
                         let newZoom = min(max(targetZoom, 1.0), deviceMaxZoom)
                         newDevice.videoZoomFactor = newZoom
-                        print("📷 Wide camera zoom set to \(newZoom)x")
+                        AppConstants.Log.camera.debug("📷 Wide camera zoom set to \(newZoom)x")
                     }
                     newDevice.unlockForConfiguration()
                     
-                    print("✅ Successfully added \(type.rawValue) to session")
-                    print("📹 Session now has \(self.session.inputs.count) input(s) and \(self.session.outputs.count) output(s)")
+                    AppConstants.Log.camera.debug("✅ Successfully added \(type.rawValue) to session")
+                    AppConstants.Log.camera.debug("📹 Session now has \(self.session.inputs.count) input(s) and \(self.session.outputs.count) output(s)")
                     
                     // Commit configuration
                     self.session.commitConfiguration()
-                    print("✅ Session configuration committed")
+                    AppConstants.Log.camera.debug("✅ Session configuration committed")
                     
                     // Ensure session is running
                     if !self.session.isRunning {
                         self.session.startRunning()
-                        print("▶️ Started session after camera switch")
+                        AppConstants.Log.camera.debug("▶️ Started session after camera switch")
                     }
                     
                     // Update UI on main thread
@@ -468,15 +468,15 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                             CATransaction.setDisableActions(true)
                             layer.session = self.session
                             CATransaction.commit()
-                            print("📱 Preview layer updated")
+                            AppConstants.Log.camera.debug("📱 Preview layer updated")
                         }
                         
                         // Reset switching flag
                         self.isSwitchingCamera = false
-                        print("✅ Camera switch completed to \(type.rawValue) at \(targetZoom)x")
+                        AppConstants.Log.camera.debug("✅ Camera switch completed to \(type.rawValue) at \(targetZoom)x")
                     }
                 } else {
-                    print("❌ Cannot add camera input to session")
+                    AppConstants.Log.camera.debug("❌ Cannot add camera input to session")
                     self.session.commitConfiguration()
                     
                     DispatchQueue.main.async {
@@ -484,7 +484,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
                     }
                 }
             } catch {
-                print("❌ Error switching camera: \(error)")
+                AppConstants.Log.camera.debug("❌ Error switching camera: \(error)")
                 self.session.commitConfiguration()
                 
                 DispatchQueue.main.async {
@@ -496,7 +496,7 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
 
     func capturePhoto() {
         guard isAuthorized, canCapture else {
-            print("🚫 Not ready to capture")
+            AppConstants.Log.camera.debug("🚫 Not ready to capture")
             return
         }
 
@@ -505,9 +505,9 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         // Configure flash if supported by the device
         if output.supportedFlashModes.contains(flashMode) {
             settings.flashMode = flashMode
-            print("💡 Flash mode set to: \(flashMode == .on ? "ON" : flashMode == .off ? "OFF" : "AUTO")")
+            AppConstants.Log.camera.debug("💡 Flash mode set to: \(self.flashMode == .on ? "ON" : self.flashMode == .off ? "OFF" : "AUTO")")
         } else {
-            print("⚠️ Flash mode \(flashMode.rawValue) not supported on this device")
+            AppConstants.Log.camera.debug("⚠️ Flash mode \(self.flashMode.rawValue) not supported on this device")
         }
 
         // Let AVFoundation handle orientation automatically via EXIF metadata
@@ -517,31 +517,43 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
 
 extension CameraService: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil, let data = photo.fileDataRepresentation(), var ui = UIImage(data: data) else { return }
+        guard error == nil, let data = photo.fileDataRepresentation(), let originalImage = UIImage(data: data) else { return }
 
         // For front camera, flip the image horizontally to match what user sees in preview
-        // The rotation is already correct from the capture settings, we just need to mirror
-        if isFront, let cgImage = ui.cgImage {
-            // Flip horizontally while preserving the correct orientation
-            UIGraphicsBeginImageContextWithOptions(ui.size, false, ui.scale)
-            guard let context = UIGraphicsGetCurrentContext() else { return }
+        // Move this expensive operation off the main thread
+        if isFront {
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self = self else { return }
 
-            // Flip the context horizontally
-            context.translateBy(x: ui.size.width, y: 0)
-            context.scaleBy(x: -1.0, y: 1.0)
+                let flippedImage = await Task {
+                    // Flip horizontally while preserving the correct orientation
+                    guard let cgImage = originalImage.cgImage else { return originalImage }
 
-            // Draw the image in the flipped context
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: ui.size.width, height: ui.size.height))
+                    UIGraphicsBeginImageContextWithOptions(originalImage.size, false, originalImage.scale)
+                    guard let context = UIGraphicsGetCurrentContext() else { return originalImage }
 
-            if let flippedImage = UIGraphicsGetImageFromCurrentImageContext() {
-                ui = flippedImage
-                print("🔄 Front camera photo mirrored horizontally")
+                    // Flip the context horizontally
+                    context.translateBy(x: originalImage.size.width, y: 0)
+                    context.scaleBy(x: -1.0, y: 1.0)
+
+                    // Draw the image in the flipped context
+                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: originalImage.size.width, height: originalImage.size.height))
+
+                    let result = UIGraphicsGetImageFromCurrentImageContext() ?? originalImage
+                    UIGraphicsEndImageContext()
+
+                    AppConstants.Log.camera.debug("Front camera photo mirrored horizontally")
+                    return result
+                }.value
+
+                await MainActor.run {
+                    self.latestPhoto = flippedImage
+                }
             }
-
-            UIGraphicsEndImageContext()
+        } else {
+            // Back camera - no flipping needed
+            latestPhoto = originalImage
         }
-
-        latestPhoto = ui
     }
 }
 
