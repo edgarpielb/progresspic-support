@@ -206,6 +206,8 @@ struct MeasurementDetailView: View {
                         .frame(height: 250)
                         .padding()
                     } else {
+                        let allXAxisLabels = getAllXAxisDates().map { formatXAxisLabel($0) }
+                        
                         Chart {
                             ForEach(Array(aggregatedEntries.enumerated()), id: \.offset) { index, entry in
                                 LineMark(
@@ -223,10 +225,10 @@ struct MeasurementDetailView: View {
                                 .symbolSize(30)
                             }
                         }
+                        .chartXScale(domain: allXAxisLabels)
                         .chartYScale(domain: calculateYDomain())
-                        .chartXScale(domain: .automatic(includesZero: false))
                         .chartXAxis {
-                            AxisMarks { value in
+                            AxisMarks(values: allXAxisLabels) { value in
                                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                                     .foregroundStyle(.white.opacity(0.1))
                                 AxisValueLabel(centered: true)
@@ -320,8 +322,7 @@ struct MeasurementDetailView: View {
                                 .foregroundColor(.white)
                                 .padding(.horizontal)
                             
-                            List {
-                                // Use explicit IDs for better performance
+                            VStack(spacing: 0) {
                                 ForEach(Array(filteredEntries.reversed().enumerated()), id: \.element.id) { index, entry in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
@@ -339,23 +340,25 @@ struct MeasurementDetailView: View {
                                             .font(.callout.bold())
                                             .foregroundColor(.white)
                                     }
-                                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                                    .listRowBackground(Color.white.opacity(0.05))
-                                    .listRowSeparator(.visible, edges: .all)
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 16)
+                                    .background(Color.white.opacity(0.05))
+                                    .contentShape(Rectangle())
+                                    .contextMenu {
                                         Button(role: .destructive) {
                                             entryToDelete = entry
                                             showDeleteConfirmation = true
                                         } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
-                                        .tint(.red)
+                                    }
+                                    
+                                    if index < filteredEntries.count - 1 {
+                                        Divider()
+                                            .background(Color.white.opacity(0.1))
                                     }
                                 }
                             }
-                            .listStyle(.plain)
-                            .scrollDisabled(true)
-                            .frame(height: CGFloat(filteredEntries.count * 60))
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .glassCard()
                             .padding(.horizontal)
@@ -472,9 +475,214 @@ struct MeasurementDetailView: View {
         return lowerBound...upperBound
     }
     
-    private func getXAxisValues() -> [Date] {
-        // Use the actual data point dates for perfect alignment
-        return aggregatedEntries.map { $0.date }
+    private func getAllXAxisDates() -> [Date] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        switch selectedTimeRange {
+        case .week:
+            // Get the week containing the most recent measurement (or today if no data)
+            let referenceDate = filteredEntries.last?.date ?? now
+            var weekStart = calendar.startOfDay(for: referenceDate)
+            let weekday = calendar.component(.weekday, from: weekStart)
+            let daysToSubtract = weekday == 1 ? 6 : weekday - 2
+            weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
+            
+            // Generate all 7 days (Mon-Sun)
+            var dates: [Date] = []
+            var currentDate = weekStart
+            for _ in 0..<7 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .month:
+            // Show last 4 weeks
+            let referenceDate = filteredEntries.last?.date ?? now
+            let endWeek = calendar.dateInterval(of: .weekOfYear, for: referenceDate)?.start ?? calendar.startOfDay(for: referenceDate)
+            
+            var dates: [Date] = []
+            var currentDate = calendar.date(byAdding: .weekOfYear, value: -3, to: endWeek) ?? endWeek
+            
+            for _ in 0..<4 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .weekOfYear, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .sixMonths:
+            // Show 6 months
+            let endMonth = calendar.dateInterval(of: .month, for: filteredEntries.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -5, to: endMonth) ?? endMonth
+            
+            var dates: [Date] = []
+            var currentDate = startMonth
+            for _ in 0..<6 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .year:
+            // Show 12 months
+            let endMonth = calendar.dateInterval(of: .month, for: filteredEntries.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -11, to: endMonth) ?? endMonth
+            
+            var dates: [Date] = []
+            var currentDate = startMonth
+            for _ in 0..<12 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .all:
+            // For all view, show quarters based on actual data range
+            guard let firstDate = filteredEntries.first?.date,
+                  let lastDate = filteredEntries.last?.date else {
+                return []
+            }
+            
+            let firstComponents = calendar.dateComponents([.year, .month], from: firstDate)
+            let firstMonth = firstComponents.month ?? 1
+            let firstYear = firstComponents.year ?? 2024
+            let firstQuarterMonth = ((firstMonth - 1) / 3) * 3 + 1
+            
+            var startComponents = DateComponents()
+            startComponents.year = firstYear
+            startComponents.month = firstQuarterMonth
+            startComponents.day = 1
+            
+            let lastComponents = calendar.dateComponents([.year, .month], from: lastDate)
+            let lastMonth = lastComponents.month ?? 1
+            let lastYear = lastComponents.year ?? 2024
+            let lastQuarterMonth = ((lastMonth - 1) / 3) * 3 + 1
+            
+            var endComponents = DateComponents()
+            endComponents.year = lastYear
+            endComponents.month = lastQuarterMonth
+            endComponents.day = 1
+            
+            guard let startQuarter = calendar.date(from: startComponents),
+                  let endQuarter = calendar.date(from: endComponents) else {
+                return []
+            }
+            
+            var dates: [Date] = []
+            var currentDate = startQuarter
+            while currentDate <= endQuarter {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 3, to: currentDate) ?? currentDate
+            }
+            return dates
+        }
+    }
+    
+    private func getXAxisValues() -> [String] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        switch selectedTimeRange {
+        case .week:
+            // Get the week containing the most recent measurement (or today if no data)
+            let referenceDate = filteredEntries.last?.date ?? now
+            var weekStart = calendar.startOfDay(for: referenceDate)
+            let weekday = calendar.component(.weekday, from: weekStart)
+            let daysToSubtract = weekday == 1 ? 6 : weekday - 2
+            weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
+            
+            // Generate all 7 days (Mon-Sun)
+            var dates: [String] = []
+            var currentDate = weekStart
+            for _ in 0..<7 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .month:
+            // Show 4-5 weeks based on actual data range
+            let startDate = filteredEntries.first?.date ?? calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            let endDate = filteredEntries.last?.date ?? now
+            
+            let startWeek = calendar.dateInterval(of: .weekOfYear, for: startDate)?.start ?? startDate
+            let endWeek = calendar.dateInterval(of: .weekOfYear, for: endDate)?.start ?? endDate
+            
+            var dates: [String] = []
+            var currentDate = startWeek
+            while currentDate <= endWeek {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .weekOfYear, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .sixMonths:
+            // Show 6 months
+            let endMonth = calendar.dateInterval(of: .month, for: filteredEntries.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -5, to: endMonth) ?? endMonth
+            
+            var dates: [String] = []
+            var currentDate = startMonth
+            for _ in 0..<6 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .year:
+            // Show 12 months
+            let endMonth = calendar.dateInterval(of: .month, for: filteredEntries.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -11, to: endMonth) ?? endMonth
+            
+            var dates: [String] = []
+            var currentDate = startMonth
+            for _ in 0..<12 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .all:
+            // For all view, show quarters based on actual data range
+            guard let firstDate = filteredEntries.first?.date,
+                  let lastDate = filteredEntries.last?.date else {
+                return []
+            }
+            
+            let firstComponents = calendar.dateComponents([.year, .month], from: firstDate)
+            let firstMonth = firstComponents.month ?? 1
+            let firstYear = firstComponents.year ?? 2024
+            let firstQuarterMonth = ((firstMonth - 1) / 3) * 3 + 1
+            
+            var startComponents = DateComponents()
+            startComponents.year = firstYear
+            startComponents.month = firstQuarterMonth
+            startComponents.day = 1
+            
+            let lastComponents = calendar.dateComponents([.year, .month], from: lastDate)
+            let lastMonth = lastComponents.month ?? 1
+            let lastYear = lastComponents.year ?? 2024
+            let lastQuarterMonth = ((lastMonth - 1) / 3) * 3 + 1
+            
+            var endComponents = DateComponents()
+            endComponents.year = lastYear
+            endComponents.month = lastQuarterMonth
+            endComponents.day = 1
+            
+            guard let startQuarter = calendar.date(from: startComponents),
+                  let endQuarter = calendar.date(from: endComponents) else {
+                return []
+            }
+            
+            var dates: [String] = []
+            var currentDate = startQuarter
+            while currentDate <= endQuarter {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 3, to: currentDate) ?? currentDate
+            }
+            return dates
+        }
     }
     
     private func formatXAxisLabel(_ date: Date) -> String {
@@ -487,7 +695,7 @@ struct MeasurementDetailView: View {
             return formatter.string(from: date)
             
         case .month:
-            // Show date ranges in 7-day spans (e.g., "8-14", "15-21")
+            // Show date ranges in 7-day spans (e.g., "27-2" for Oct 27 - Nov 2)
             let startDay = calendar.component(.day, from: date)
             if let endDate = calendar.date(byAdding: .day, value: 6, to: date) {
                 let endDay = calendar.component(.day, from: endDate)
@@ -514,7 +722,6 @@ struct MeasurementDetailView: View {
     
     private func aggregateEntriesByDay(_ entries: [MeasurementEntry]) -> [MeasurementEntry] {
         guard !entries.isEmpty else { return [] }
-        guard let firstEntry = entries.first else { return [] }
         
         let calendar = Calendar.current
         var dailyData: [Date: (values: [Double], journeyId: UUID, type: MeasurementType)] = [:]
@@ -543,7 +750,7 @@ struct MeasurementDetailView: View {
         let daysToSubtract = weekday == 1 ? 6 : weekday - 2
         weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
         
-        // Generate all 7 days (Mon-Sun)
+        // Generate results only for days that have data
         var results: [MeasurementEntry] = []
         var currentDate = weekStart
         
@@ -551,12 +758,8 @@ struct MeasurementDetailView: View {
             if let data = dailyData[currentDate] {
                 let average = data.values.reduce(0, +) / Double(data.values.count)
                 results.append(MeasurementEntry(journeyId: data.journeyId, date: currentDate, type: data.type, value: average, unit: .cm))
-            } else {
-                // Add interpolated point to maintain chart structure
-                if let lastValue = results.last?.value {
-                    results.append(MeasurementEntry(journeyId: firstEntry.journeyId, date: currentDate, type: firstEntry.type, value: lastValue, unit: .cm))
-                }
             }
+            // Don't add interpolated points - only plot actual data
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
         }
         
@@ -837,21 +1040,21 @@ struct MeasurementRangeComparison {
             baseRange = (23, 28) // Average female
         }
         
-        // Adjust for age - body fat tends to increase with age
+        // Adjust for age - body fat tends to increase with age (more gradual increase)
         let ageAdjustment: Double
         switch userAge {
         case 18...29:
-            ageAdjustment = -2.0
+            ageAdjustment = -1.5  // Younger adults typically leaner
         case 30...39:
-            ageAdjustment = 0.0
+            ageAdjustment = 0.0   // Baseline age group
         case 40...49:
-            ageAdjustment = 2.0
+            ageAdjustment = 1.5   // Gradual increase
         case 50...59:
-            ageAdjustment = 3.0
+            ageAdjustment = 2.5   // Continued increase
         case 60...:
-            ageAdjustment = 4.0
+            ageAdjustment = 3.5   // More moderate than before
         default:
-            ageAdjustment = -2.0
+            ageAdjustment = -1.5
         }
         
         return (baseRange.lower + ageAdjustment)...(baseRange.upper + ageAdjustment)
@@ -859,18 +1062,18 @@ struct MeasurementRangeComparison {
     
     // Chest measurement averages
     private func averageChest() -> ClosedRange<Double> {
-        // Base measurements for average height (175cm male, 162cm female)
+        // Base measurements for average height (175.5cm male, 161.8cm female)
         var baseRange: (lower: Double, upper: Double)
         
         switch userGender {
         case .male:
-            baseRange = (95, 110) // cm
+            baseRange = (98, 110) // cm - Based on US average of 106.6cm
         case .female:
-            baseRange = (85, 100) // cm
+            baseRange = (88, 105) // cm - Based on US average of 100.1cm
         }
         
-        // Scale based on height (approximately 0.55-0.65 of height)
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        // Scale based on height
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return (baseRange.lower * heightRatio)...(baseRange.upper * heightRatio)
     }
@@ -881,30 +1084,30 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (75, 90) // cm
+            baseRange = (80, 95) // cm - Updated based on US average of 95cm
         case .female:
-            baseRange = (65, 80) // cm
+            baseRange = (70, 89) // cm - Updated based on US average of 89cm
         }
         
-        // Adjust for age - waist tends to increase with age
+        // Adjust for age - waist tends to increase with age (more moderate adjustments)
         let ageAdjustment: Double
         switch userAge {
         case 18...29:
-            ageAdjustment = -5.0
+            ageAdjustment = -3.0  // Younger adults typically have smaller waists
         case 30...39:
-            ageAdjustment = 0.0
+            ageAdjustment = 0.0   // Baseline age group
         case 40...49:
-            ageAdjustment = 3.0
+            ageAdjustment = 2.0   // Moderate increase
         case 50...59:
-            ageAdjustment = 5.0
+            ageAdjustment = 4.0   // Continued increase
         case 60...:
-            ageAdjustment = 7.0
+            ageAdjustment = 5.0   // More moderate than before
         default:
-            ageAdjustment = -5.0
+            ageAdjustment = -3.0
         }
         
         // Scale based on height
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return ((baseRange.lower + ageAdjustment) * heightRatio)...((baseRange.upper + ageAdjustment) * heightRatio)
     }
@@ -915,41 +1118,41 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (90, 105) // cm
+            baseRange = (92, 104) // cm - Based on US average of 99.9cm
         case .female:
-            baseRange = (95, 110) // cm
+            baseRange = (94, 108) // cm - Based on US average of 101.4cm (women typically have wider hips)
         }
         
         // Scale based on height
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return (baseRange.lower * heightRatio)...(baseRange.upper * heightRatio)
     }
     
-    // Biceps measurement averages
+    // Biceps measurement averages (flexed)
     private func averageBiceps() -> ClosedRange<Double> {
         var baseRange: (lower: Double, upper: Double)
         
         switch userGender {
         case .male:
-            baseRange = (30, 38) // cm
+            baseRange = (31, 39) // cm - Average for adult males
         case .female:
-            baseRange = (25, 33) // cm
+            baseRange = (26, 34) // cm - Average for adult females
         }
         
-        // Adjust for age - muscle mass tends to decrease with age
+        // Adjust for age - muscle mass tends to decrease with age (more moderate decline)
         let ageAdjustment: Double
         switch userAge {
         case 18...29:
-            ageAdjustment = 1.0
+            ageAdjustment = 0.5   // Peak muscle years
         case 30...39:
-            ageAdjustment = 0.0
+            ageAdjustment = 0.0   // Baseline
         case 40...49:
-            ageAdjustment = -1.0
+            ageAdjustment = -0.5  // Slight decline
         case 50...59:
-            ageAdjustment = -2.0
+            ageAdjustment = -1.0  // Moderate decline (sarcopenia begins)
         case 60...:
-            ageAdjustment = -3.0
+            ageAdjustment = -1.5  // More pronounced decline
         default:
             ageAdjustment = 0.0
         }
@@ -963,13 +1166,13 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (50, 60) // cm
+            baseRange = (52, 62) // cm - Updated based on anthropometric data
         case .female:
-            baseRange = (52, 62) // cm (typically larger due to body composition)
+            baseRange = (54, 64) // cm - Slightly larger due to body fat distribution
         }
         
         // Scale based on height
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return (baseRange.lower * heightRatio)...(baseRange.upper * heightRatio)
     }
@@ -980,13 +1183,13 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (35, 42) // cm
+            baseRange = (36, 42) // cm - Updated based on anthropometric data
         case .female:
-            baseRange = (33, 40) // cm
+            baseRange = (34, 40) // cm - Updated based on anthropometric data
         }
         
         // Scale based on height
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return (baseRange.lower * heightRatio)...(baseRange.upper * heightRatio)
     }
@@ -997,28 +1200,28 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (37, 42) // cm
+            baseRange = (38, 43) // cm - Updated based on anthropometric data
         case .female:
-            baseRange = (32, 36) // cm
+            baseRange = (32, 36) // cm - Updated based on anthropometric data
         }
         
-        // Slight adjustment for age (neck can expand slightly with age)
+        // Slight adjustment for age (neck can expand slightly with age due to weight gain)
         let ageAdjustment: Double
         switch userAge {
         case 18...29:
-            ageAdjustment = -0.5
+            ageAdjustment = -0.3  // Younger, typically leaner
         case 30...39:
-            ageAdjustment = 0.0
+            ageAdjustment = 0.0   // Baseline
         case 40...49:
-            ageAdjustment = 0.5
+            ageAdjustment = 0.3   // Slight increase
         case 50...:
-            ageAdjustment = 1.0
+            ageAdjustment = 0.5   // Modest increase
         default:
-            ageAdjustment = -0.5
+            ageAdjustment = -0.3
         }
         
         // Scale based on height
-        let heightRatio = userHeight / (userGender == .male ? 175.0 : 162.0)
+        let heightRatio = userHeight / (userGender == .male ? 175.5 : 161.8)
         
         return ((baseRange.lower + ageAdjustment) * heightRatio)...((baseRange.upper + ageAdjustment) * heightRatio)
     }
@@ -1029,24 +1232,24 @@ struct MeasurementRangeComparison {
         
         switch userGender {
         case .male:
-            baseRange = (26, 32) // cm
+            baseRange = (27, 31) // cm - Updated based on anthropometric data
         case .female:
-            baseRange = (22, 27) // cm
+            baseRange = (23, 27) // cm - Updated based on anthropometric data
         }
         
-        // Adjust for age - muscle mass tends to decrease with age
+        // Adjust for age - muscle mass tends to decrease with age (moderate decline)
         let ageAdjustment: Double
         switch userAge {
         case 18...29:
-            ageAdjustment = 0.5
+            ageAdjustment = 0.3   // Peak muscle years
         case 30...39:
-            ageAdjustment = 0.0
+            ageAdjustment = 0.0   // Baseline
         case 40...49:
-            ageAdjustment = -0.5
+            ageAdjustment = -0.3  // Slight decline
         case 50...59:
-            ageAdjustment = -1.0
+            ageAdjustment = -0.6  // Moderate decline
         case 60...:
-            ageAdjustment = -1.5
+            ageAdjustment = -1.0  // More pronounced decline
         default:
             ageAdjustment = 0.0
         }

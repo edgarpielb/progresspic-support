@@ -160,6 +160,8 @@ struct BodyCompositionDetailView: View {
                         .frame(height: 250)
                         .padding()
                     } else {
+                        let allXAxisLabels = getAllXAxisDates().map { formatXAxisLabel($0) }
+                        
                         Chart {
                             ForEach(Array(aggregatedData.enumerated()), id: \.offset) { index, point in
                                 LineMark(
@@ -177,10 +179,10 @@ struct BodyCompositionDetailView: View {
                                 .symbolSize(30)
                             }
                         }
+                        .chartXScale(domain: allXAxisLabels)
                         .chartYScale(domain: calculateYDomain())
-                        .chartXScale(domain: .automatic(includesZero: false))
                         .chartXAxis {
-                            AxisMarks { value in
+                            AxisMarks(values: allXAxisLabels) { value in
                                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                                     .foregroundStyle(.white.opacity(0.1))
                                 AxisValueLabel(centered: true)
@@ -275,8 +277,7 @@ struct BodyCompositionDetailView: View {
                             .padding(.horizontal)
                         
                         if !historicalData.isEmpty {
-                            List {
-                                // Use explicit IDs for better performance
+                            VStack(spacing: 0) {
                                 ForEach(Array(historicalData.reversed().enumerated()), id: \.element.id) { index, point in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
@@ -292,23 +293,25 @@ struct BodyCompositionDetailView: View {
                                             .font(.callout.bold())
                                             .foregroundColor(.white)
                                     }
-                                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                                    .listRowBackground(Color.white.opacity(0.05))
-                                    .listRowSeparator(.visible, edges: .all)
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 16)
+                                    .background(Color.white.opacity(0.05))
+                                    .contentShape(Rectangle())
+                                    .contextMenu {
                                         Button(role: .destructive) {
                                             pointToDelete = point
                                             showDeleteConfirmation = true
                                         } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
-                                        .tint(.red)
+                                    }
+                                    
+                                    if index < historicalData.count - 1 {
+                                        Divider()
+                                            .background(Color.white.opacity(0.1))
                                     }
                                 }
                             }
-                            .listStyle(.plain)
-                            .scrollDisabled(true)
-                            .frame(height: CGFloat(historicalData.count * 60))
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                             .glassCard()
                             .padding(.horizontal)
@@ -501,9 +504,215 @@ struct BodyCompositionDetailView: View {
         }
     }
     
-    private func getXAxisValues() -> [Date] {
-        // Use the actual data point dates for perfect alignment
-        return aggregatedData.map { $0.date }
+    
+    private func getAllXAxisDates() -> [Date] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        switch selectedTimeRange {
+        case .week:
+            // Get the week containing the most recent measurement (or today if no data)
+            let referenceDate = historicalData.last?.date ?? now
+            var weekStart = calendar.startOfDay(for: referenceDate)
+            let weekday = calendar.component(.weekday, from: weekStart)
+            let daysToSubtract = weekday == 1 ? 6 : weekday - 2
+            weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
+            
+            // Generate all 7 days (Mon-Sun)
+            var dates: [Date] = []
+            var currentDate = weekStart
+            for _ in 0..<7 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .month:
+            // Show last 4 weeks
+            let referenceDate = historicalData.last?.date ?? now
+            let endWeek = calendar.dateInterval(of: .weekOfYear, for: referenceDate)?.start ?? calendar.startOfDay(for: referenceDate)
+            
+            var dates: [Date] = []
+            var currentDate = calendar.date(byAdding: .weekOfYear, value: -3, to: endWeek) ?? endWeek
+            
+            for _ in 0..<4 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .weekOfYear, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .sixMonths:
+            // Show 6 months
+            let endMonth = calendar.dateInterval(of: .month, for: historicalData.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -5, to: endMonth) ?? endMonth
+            
+            var dates: [Date] = []
+            var currentDate = startMonth
+            for _ in 0..<6 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .year:
+            // Show 12 months
+            let endMonth = calendar.dateInterval(of: .month, for: historicalData.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -11, to: endMonth) ?? endMonth
+            
+            var dates: [Date] = []
+            var currentDate = startMonth
+            for _ in 0..<12 {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .all:
+            // For all view, show quarters based on actual data range
+            guard let firstDate = historicalData.first?.date,
+                  let lastDate = historicalData.last?.date else {
+                return []
+            }
+            
+            let firstComponents = calendar.dateComponents([.year, .month], from: firstDate)
+            let firstMonth = firstComponents.month ?? 1
+            let firstYear = firstComponents.year ?? 2024
+            let firstQuarterMonth = ((firstMonth - 1) / 3) * 3 + 1
+            
+            var startComponents = DateComponents()
+            startComponents.year = firstYear
+            startComponents.month = firstQuarterMonth
+            startComponents.day = 1
+            
+            let lastComponents = calendar.dateComponents([.year, .month], from: lastDate)
+            let lastMonth = lastComponents.month ?? 1
+            let lastYear = lastComponents.year ?? 2024
+            let lastQuarterMonth = ((lastMonth - 1) / 3) * 3 + 1
+            
+            var endComponents = DateComponents()
+            endComponents.year = lastYear
+            endComponents.month = lastQuarterMonth
+            endComponents.day = 1
+            
+            guard let startQuarter = calendar.date(from: startComponents),
+                  let endQuarter = calendar.date(from: endComponents) else {
+                return []
+            }
+            
+            var dates: [Date] = []
+            var currentDate = startQuarter
+            while currentDate <= endQuarter {
+                dates.append(currentDate)
+                currentDate = calendar.date(byAdding: .month, value: 3, to: currentDate) ?? currentDate
+            }
+            return dates
+        }
+    }
+    
+    private func getXAxisValues() -> [String] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        switch selectedTimeRange {
+        case .week:
+            // Get the week containing the most recent measurement (or today if no data)
+            let referenceDate = historicalData.last?.date ?? now
+            var weekStart = calendar.startOfDay(for: referenceDate)
+            let weekday = calendar.component(.weekday, from: weekStart)
+            let daysToSubtract = weekday == 1 ? 6 : weekday - 2
+            weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
+            
+            // Generate all 7 days (Mon-Sun)
+            var dates: [String] = []
+            var currentDate = weekStart
+            for _ in 0..<7 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .month:
+            // Show 4-5 weeks based on actual data range
+            let startDate = historicalData.first?.date ?? calendar.date(byAdding: .month, value: -1, to: now) ?? now
+            let endDate = historicalData.last?.date ?? now
+            
+            let startWeek = calendar.dateInterval(of: .weekOfYear, for: startDate)?.start ?? startDate
+            let endWeek = calendar.dateInterval(of: .weekOfYear, for: endDate)?.start ?? endDate
+            
+            var dates: [String] = []
+            var currentDate = startWeek
+            while currentDate <= endWeek {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .weekOfYear, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .sixMonths:
+            // Show 6 months
+            let endMonth = calendar.dateInterval(of: .month, for: historicalData.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -5, to: endMonth) ?? endMonth
+            
+            var dates: [String] = []
+            var currentDate = startMonth
+            for _ in 0..<6 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .year:
+            // Show 12 months
+            let endMonth = calendar.dateInterval(of: .month, for: historicalData.last?.date ?? now)?.start ?? calendar.startOfDay(for: now)
+            let startMonth = calendar.date(byAdding: .month, value: -11, to: endMonth) ?? endMonth
+            
+            var dates: [String] = []
+            var currentDate = startMonth
+            for _ in 0..<12 {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 1, to: currentDate) ?? currentDate
+            }
+            return dates
+            
+        case .all:
+            // For all view, show quarters based on actual data range
+            guard let firstDate = historicalData.first?.date,
+                  let lastDate = historicalData.last?.date else {
+                return []
+            }
+            
+            let firstComponents = calendar.dateComponents([.year, .month], from: firstDate)
+            let firstMonth = firstComponents.month ?? 1
+            let firstYear = firstComponents.year ?? 2024
+            let firstQuarterMonth = ((firstMonth - 1) / 3) * 3 + 1
+            
+            var startComponents = DateComponents()
+            startComponents.year = firstYear
+            startComponents.month = firstQuarterMonth
+            startComponents.day = 1
+            
+            let lastComponents = calendar.dateComponents([.year, .month], from: lastDate)
+            let lastMonth = lastComponents.month ?? 1
+            let lastYear = lastComponents.year ?? 2024
+            let lastQuarterMonth = ((lastMonth - 1) / 3) * 3 + 1
+            
+            var endComponents = DateComponents()
+            endComponents.year = lastYear
+            endComponents.month = lastQuarterMonth
+            endComponents.day = 1
+            
+            guard let startQuarter = calendar.date(from: startComponents),
+                  let endQuarter = calendar.date(from: endComponents) else {
+                return []
+            }
+            
+            var dates: [String] = []
+            var currentDate = startQuarter
+            while currentDate <= endQuarter {
+                dates.append(formatXAxisLabel(currentDate))
+                currentDate = calendar.date(byAdding: .month, value: 3, to: currentDate) ?? currentDate
+            }
+            return dates
+        }
     }
     
     private func formatXAxisLabel(_ date: Date) -> String {
@@ -516,7 +725,7 @@ struct BodyCompositionDetailView: View {
             return formatter.string(from: date)
             
         case .month:
-            // Show date ranges in 7-day spans (e.g., "8-14", "15-21")
+            // Show date ranges in 7-day spans (e.g., "27-2" for Oct 27 - Nov 2)
             let startDay = calendar.component(.day, from: date)
             if let endDate = calendar.date(byAdding: .day, value: 6, to: date) {
                 let endDay = calendar.component(.day, from: endDate)

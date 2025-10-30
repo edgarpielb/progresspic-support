@@ -36,7 +36,7 @@ enum ChartAggregationHelpers {
         let daysToSubtract = weekday == 1 ? 6 : weekday - 2
         weekStart = calendar.date(byAdding: .day, value: -daysToSubtract, to: weekStart) ?? weekStart
         
-        // Generate all 7 days (Mon-Sun)
+        // Generate results only for days that have data
         var results: [T] = []
         var currentDate = weekStart
         
@@ -44,12 +44,8 @@ enum ChartAggregationHelpers {
             if let values = dailyData[currentDate] {
                 let average = values.reduce(0, +) / Double(values.count)
                 results.append(createPoint(currentDate, average))
-            } else {
-                // Add interpolated point to maintain chart structure
-                if let lastValue = results.last?[keyPath: valueKeyPath] {
-                    results.append(createPoint(currentDate, lastValue))
-                }
             }
+            // Don't add interpolated points - only plot actual data
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
         }
         
