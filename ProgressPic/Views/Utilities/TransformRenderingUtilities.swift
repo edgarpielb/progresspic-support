@@ -43,7 +43,7 @@ struct TransformRenderer {
         
         let renderer = UIGraphicsImageRenderer(size: outputSize)
         return renderer.image { ctx in
-            // Draw blurred background first (fills entire output area)
+            // Draw blurred background using the ORIGINAL source image (not transformed)
             drawBlurredBackground(
                 sourceImage: sourceImage,
                 in: ctx.cgContext,
@@ -123,80 +123,81 @@ struct TransformRenderer {
                transform.rotation == 0
     }
 
-    /// Draws a blurred, scaled version of the source image as background
+    /// Draws a blurred version of the original source image as background
     /// This creates a more natural look when the image doesn't fill the crop area
+    /// The background is always the full original image (blurred), regardless of transforms
     private static func drawBlurredBackground(
         sourceImage: UIImage,
         in context: CGContext,
         size: CGSize
     ) {
-        // Create a blurred version of the image
+        // Fill with dark background first
+        context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        
+        // Calculate how to fill the output frame with the original image (aspect fill)
+        let imageAspect = sourceImage.size.width / sourceImage.size.height
+        let outputAspect = size.width / size.height
+        
+        var fillSize: CGSize
+        var drawRect: CGRect
+        
+        if imageAspect > outputAspect {
+            // Image is wider - scale to fill height, crop width
+            fillSize = CGSize(width: size.height * imageAspect, height: size.height)
+            drawRect = CGRect(
+                x: -(fillSize.width - size.width) / 2,
+                y: 0,
+                width: fillSize.width,
+                height: fillSize.height
+            )
+        } else {
+            // Image is taller - scale to fill width, crop height
+            fillSize = CGSize(width: size.width, height: size.width / imageAspect)
+            drawRect = CGRect(
+                x: 0,
+                y: -(fillSize.height - size.height) / 2,
+                width: fillSize.width,
+                height: fillSize.height
+            )
+        }
+        
+        // Apply blur directly to the source image
         guard let ciImage = CIImage(image: sourceImage) else {
-            // Fallback to dark background if blur fails
-            context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            context.fill(CGRect(origin: .zero, size: size))
             return
         }
+        
+        // Store the original extent before blurring
+        let originalExtent = ciImage.extent
 
         // Apply Gaussian blur
         let blurFilter = CIFilter(name: "CIGaussianBlur")
         blurFilter?.setValue(ciImage, forKey: kCIInputImageKey)
-        blurFilter?.setValue(40.0, forKey: kCIInputRadiusKey) // Strong blur
+        blurFilter?.setValue(50.0, forKey: kCIInputRadiusKey) // Strong blur
 
         guard let blurredCIImage = blurFilter?.outputImage else {
-            // Fallback to dark background if blur fails
-            context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            context.fill(CGRect(origin: .zero, size: size))
             return
         }
 
+        // Crop the blurred image back to the original extent (before blur expanded it)
+        let croppedBlurred = blurredCIImage.cropped(to: originalExtent)
+
         // Render the blurred image
         let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-
-        // Scale the blurred image to fill the entire output size while maintaining aspect
-        let imageAspect = ciImage.extent.width / ciImage.extent.height
-        let outputAspect = size.width / size.height
-
-        var scaledSize: CGSize
-        var drawRect: CGRect
-
-        if imageAspect > outputAspect {
-            // Image is wider - scale to fill height
-            scaledSize = CGSize(width: size.height * imageAspect, height: size.height)
-            drawRect = CGRect(
-                x: -(scaledSize.width - size.width) / 2,
-                y: 0,
-                width: scaledSize.width,
-                height: scaledSize.height
-            )
-        } else {
-            // Image is taller - scale to fill width
-            scaledSize = CGSize(width: size.width, height: size.width / imageAspect)
-            drawRect = CGRect(
-                x: 0,
-                y: -(scaledSize.height - size.height) / 2,
-                width: scaledSize.width,
-                height: scaledSize.height
-            )
-        }
-
-        // Create CGImage from blurred CIImage
-        if let cgImage = ciContext.createCGImage(blurredCIImage, from: blurredCIImage.extent) {
-            // Darken the background with a semi-transparent overlay
+        if let cgImage = ciContext.createCGImage(croppedBlurred, from: originalExtent) {
+            // Create UIImage respecting the original orientation
+            let blurredUIImage = UIImage(cgImage: cgImage, scale: sourceImage.scale, orientation: sourceImage.imageOrientation)
+            
             context.saveGState()
-
-            // Draw the blurred image
-            context.draw(cgImage, in: drawRect)
+            
+            // Draw the blurred version in the fitted rect, scaling it down to fit
+            blurredUIImage.draw(in: drawRect)
 
             // Add dark overlay to make it more subtle
-            context.setFillColor(UIColor.black.withAlphaComponent(0.4).cgColor)
+            context.setFillColor(UIColor.black.withAlphaComponent(0.5).cgColor)
             context.fill(CGRect(origin: .zero, size: size))
 
             context.restoreGState()
-        } else {
-            // Fallback to dark background
-            context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
-            context.fill(CGRect(origin: .zero, size: size))
         }
     }
 }
