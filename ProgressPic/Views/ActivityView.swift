@@ -12,6 +12,8 @@ struct ActivityView: View {
     @State private var userProfile = UserProfile.load()
     @StateObject private var healthKit = HealthKitService.shared
     @State private var isLoadingHealthData = false
+    @State private var showExportSheet = false
+    @State private var exportFileURL: URL?
     
     private var isProfileComplete: Bool {
         userProfile.birthDate != nil && userProfile.heightCm != nil
@@ -64,16 +66,28 @@ struct ActivityView: View {
                     .foregroundColor(.white)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    if isProfileComplete {
-                        showProfileDetail = true
-                    } else {
-                        showProfileSetup = true
+                HStack(spacing: 16) {
+                    // Export button
+                    Button(action: {
+                        exportAllMeasurements()
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title3)
+                            .foregroundColor(.white)
                     }
-                }) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.title3)
-                        .foregroundColor(AppStyle.Colors.accentPrimary)
+                    
+                    // Profile button
+                    Button(action: {
+                        if isProfileComplete {
+                            showProfileDetail = true
+                        } else {
+                            showProfileSetup = true
+                        }
+                    }) {
+                        Image(systemName: "person.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(AppStyle.Colors.accentPrimary)
+                    }
                 }
             }
         }
@@ -91,6 +105,11 @@ struct ActivityView: View {
         }
         .sheet(isPresented: $showYearCalendar) {
             YearCalendarSheet(journeys: journeys)
+        }
+        .sheet(isPresented: $showExportSheet) {
+            if let url = exportFileURL {
+                ShareSheet(url: url)
+            }
         }
         .onAppear {
             // Show profile setup if not completed (only on first launch)
@@ -167,6 +186,41 @@ struct ActivityView: View {
         }
         
         return currentStreak
+    }
+    
+    private func exportAllMeasurements() {
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        // Fetch all measurement entries
+        do {
+            let allMeasurements = try ctx.fetch(FetchDescriptor<MeasurementEntry>(sortBy: [SortDescriptor(\.date, order: .forward)]))
+            
+            guard !allMeasurements.isEmpty else {
+                AppConstants.Log.data.warning("No measurements to export")
+                return
+            }
+            
+            // Get the first journey for context (or could combine all)
+            let journey = journeys.first
+            
+            // Export using the by-type format for better organization
+            guard let csvData = ExportService.exportMeasurementsByTypeToCSV(entries: allMeasurements, journey: journey ?? Journey(name: "All Journeys")) else {
+                AppConstants.Log.data.error("Failed to export measurements to CSV")
+                return
+            }
+            
+            // Create temporary file
+            let filename = ExportService.generateCSVFilename(journey: journey, type: "all_measurements")
+            
+            let fileURL = try ExportService.createTemporaryFile(data: csvData, filename: filename)
+            exportFileURL = fileURL
+            showExportSheet = true
+            AppConstants.Log.data.info("CSV export successful: \(filename)")
+        } catch {
+            AppConstants.Log.data.error("Failed to export measurements: \(error.localizedDescription)")
+        }
     }
 }
 

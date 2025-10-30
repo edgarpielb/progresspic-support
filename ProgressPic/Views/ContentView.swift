@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @State private var cameraStopTask: Task<Void, Never>?
+    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "HasCompletedOnboarding")
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -68,12 +69,12 @@ struct ContentView: View {
                 }
             } else if oldTab == 1 {
                 // Switching AWAY FROM camera tab
-                // Schedule camera stop after 5 seconds (balance between UX and battery)
+                // Schedule camera stop after 2 seconds (balance between UX and battery)
                 // Short delay makes returns feel instant, but stops soon enough to save battery
-                AppConstants.Log.app.debug("⏸️ Switching away from camera tab - scheduling stop in 5 seconds")
+                AppConstants.Log.app.debug("⏸️ Switching away from camera tab - scheduling stop in 2 seconds")
                 cameraStopTask?.cancel()
                 cameraStopTask = Task {
-                    try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
 
                     // Check if task was cancelled (user returned to camera tab)
                     guard !Task.isCancelled else {
@@ -82,7 +83,7 @@ struct ContentView: View {
                     }
 
                     await MainActor.run {
-                        AppConstants.Log.app.debug("⏸️ Stopping camera after 5-second delay")
+                        AppConstants.Log.app.debug("⏸️ Stopping camera after 2-second delay")
                         cameraService.stop()
                     }
                 }
@@ -101,6 +102,9 @@ struct ContentView: View {
                     cameraService.start()
                 }
             }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView()
         }
     }
     

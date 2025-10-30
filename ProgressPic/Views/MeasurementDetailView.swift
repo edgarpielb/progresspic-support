@@ -15,6 +15,8 @@ struct MeasurementDetailView: View {
     @State private var showAddSheet = false
     @State private var entryToDelete: MeasurementEntry?
     @State private var showDeleteConfirmation = false
+    @State private var showExportSheet = false
+    @State private var exportFileURL: URL?
     
     init(journey: Journey, measurementType: MeasurementType) {
         self.journey = journey
@@ -100,8 +102,14 @@ struct MeasurementDetailView: View {
                             .font(.headline)
                             .foregroundColor(.white)
                         Spacer()
-                        Color.clear
-                            .frame(width: 30)
+                        // Export button
+                        Button(action: {
+                            exportToCSV()
+                        }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3)
+                                .foregroundColor(.white)
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -403,6 +411,35 @@ struct MeasurementDetailView: View {
             }
         } message: { entry in
             Text("Are you sure you want to delete this measurement from \(formatFullDate(entry.date))?")
+        }
+        .sheet(isPresented: $showExportSheet) {
+            if let url = exportFileURL {
+                ShareSheet(url: url)
+            }
+        }
+    }
+    
+    private func exportToCSV() {
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        // Export filtered entries to CSV
+        guard let csvData = ExportService.exportMeasurementsToCSV(entries: filteredEntries, journey: journey) else {
+            AppConstants.Log.data.error("Failed to export measurements to CSV")
+            return
+        }
+        
+        // Create temporary file
+        let filename = ExportService.generateCSVFilename(journey: journey, type: measurementType.title.replacingOccurrences(of: " ", with: "_"))
+        
+        do {
+            let fileURL = try ExportService.createTemporaryFile(data: csvData, filename: filename)
+            exportFileURL = fileURL
+            showExportSheet = true
+            AppConstants.Log.data.info("CSV export successful: \(filename)")
+        } catch {
+            AppConstants.Log.data.error("Failed to create temporary CSV file: \(error.localizedDescription)")
         }
     }
     

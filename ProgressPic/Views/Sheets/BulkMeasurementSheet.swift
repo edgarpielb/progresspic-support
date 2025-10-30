@@ -1,6 +1,25 @@
 import SwiftUI
 import SwiftData
 
+// Helper to save/load last measurement values
+struct MeasurementMemory {
+    private static let key = "LastMeasurementValues"
+    
+    static func save(type: MeasurementType, value: Double) {
+        var saved = load()
+        saved[type.rawValue] = value
+        UserDefaults.standard.set(saved, forKey: key)
+    }
+    
+    static func load() -> [String: Double] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+    }
+    
+    static func get(type: MeasurementType) -> Double? {
+        load()[type.rawValue]
+    }
+}
+
 struct BulkMeasurementSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var ctx
@@ -10,6 +29,7 @@ struct BulkMeasurementSheet: View {
     @State private var date: Date = .now
     @State private var unit: MeasureUnit = .cm
     @State private var userProfile = UserProfile.load()
+    @State private var useLastValues = false
     
     // All measurement values as optional strings
     @State private var chest: String = ""
@@ -36,6 +56,23 @@ struct BulkMeasurementSheet: View {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Quick fill button if we have saved values
+                        if hasLastValues {
+                            Button(action: loadLastValues) {
+                                HStack {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.title3)
+                                    Text("Load Last Values")
+                                        .font(.callout.bold())
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                }
+                                .foregroundColor(AppStyle.Colors.accentPrimary)
+                                .padding(.vertical, 4)
+                            }
+                        }
                     }
                     
                     Section("Date") {
@@ -104,6 +141,54 @@ struct BulkMeasurementSheet: View {
         !calfLeft.isEmpty || !calfRight.isEmpty
     }
     
+    var hasLastValues: Bool {
+        !MeasurementMemory.load().isEmpty
+    }
+    
+    func loadLastValues() {
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
+        // Load saved values
+        if let value = MeasurementMemory.get(type: .chest) {
+            chest = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .waist) {
+            waist = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .hips) {
+            hips = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .neck) {
+            neck = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .bicepsLeft) {
+            bicepsLeft = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .bicepsRight) {
+            bicepsRight = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .forearmLeft) {
+            forearmLeft = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .forearmRight) {
+            forearmRight = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .thighLeft) {
+            thighLeft = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .thighRight) {
+            thighRight = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .calfLeft) {
+            calfLeft = String(format: "%.1f", value)
+        }
+        if let value = MeasurementMemory.get(type: .calfRight) {
+            calfRight = String(format: "%.1f", value)
+        }
+    }
+    
     func saveAllMeasurements() {
         saveMeasurement(type: .chest, value: chest)
         saveMeasurement(type: .waist, value: waist)
@@ -118,11 +203,18 @@ struct BulkMeasurementSheet: View {
         saveMeasurement(type: .calfLeft, value: calfLeft)
         saveMeasurement(type: .calfRight, value: calfRight)
         
+        // Haptic success feedback
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+        
         dismiss()
     }
     
     func saveMeasurement(type: MeasurementType, value: String) {
         guard let doubleValue = Double(value.replacingOccurrences(of: ",", with: ".")) else { return }
+        
+        // Save to measurement memory for next time
+        MeasurementMemory.save(type: type, value: doubleValue)
         
         let entry = MeasurementEntry(
             journeyId: journey.id,

@@ -29,6 +29,32 @@ enum PhotoStore {
         AppConstants.Log.photo.info("Cleared image cache")
     }
     
+    /// Prefetch photos in the background to improve scrolling performance
+    /// - Parameters:
+    ///   - photos: Array of photos to prefetch
+    ///   - targetSize: Target size for the images
+    static func prefetchPhotos(_ photos: [ProgressPhoto], targetSize: CGSize) {
+        Task(priority: .utility) {
+            for photo in photos {
+                // Check if already cached
+                let key = cacheKey(for: photo.assetLocalId, targetSize: targetSize)
+                if imageCache.object(forKey: key as NSString) != nil {
+                    continue // Already cached
+                }
+                
+                // Load and cache the image
+                if await fetchUIImage(localId: photo.assetLocalId, targetSize: targetSize) != nil {
+                    AppConstants.Log.photo.debug("Prefetched photo: \(photo.assetLocalId)")
+                } else {
+                    AppConstants.Log.photo.warning("Failed to prefetch photo: \(photo.assetLocalId)")
+                }
+                
+                // Small delay to avoid overwhelming the system
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            }
+        }
+    }
+    
     static func requestAuthorization() async -> Bool {
         // Still needed for importing existing photos from photo library
         await withCheckedContinuation { cont in

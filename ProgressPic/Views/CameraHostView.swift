@@ -58,9 +58,13 @@ struct CameraHostView: View {
                             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedZoomLevel)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Zoom \(formatZoomLevel(level))")
+                    .accessibilityValue(selectedZoomLevel == level ? "Selected" : "Not selected")
+                    .accessibilityHint("Double tap to change zoom level")
                 }
             }
             .padding(.bottom, 15)
+            .accessibilityElement(children: .contain)
         }
     }
     
@@ -218,23 +222,38 @@ struct CameraHostView: View {
                     Spacer()
                     
                     // Flash toggle
-                    Button(action: { camera.cycleFlashMode() }) {
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        camera.cycleFlashMode()
+                    }) {
                         Image(systemName: camera.flashMode == .on ? "bolt.fill" : (camera.flashMode == .auto ? "bolt.badge.automatic" : "bolt.slash"))
                             .font(.system(size: AppStyle.IconSize.xl))
                             .foregroundColor(camera.flashMode == .off ? AppStyle.Colors.textPrimary : .yellow)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
+                    .accessibilityLabel("Flash")
+                    .accessibilityValue(camera.flashMode == .on ? "On" : (camera.flashMode == .auto ? "Auto" : "Off"))
+                    .accessibilityHint("Double tap to change flash mode")
                     
                     // Camera flip
-                    Button(action: { camera.flip() }) {
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        camera.flip()
+                    }) {
                         Image(systemName: "arrow.triangle.2.circlepath.camera")
                             .font(.system(size: AppStyle.IconSize.xl))
                             .foregroundColor(AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
+                    .accessibilityLabel("Flip Camera")
+                    .accessibilityHint("Double tap to switch between front and back camera")
                     
                     // Timer
                     Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
                         showTimerControls.toggle()
                         if showTimerControls { showGhostControls = false }
                     }) {
@@ -243,22 +262,39 @@ struct CameraHostView: View {
                             .foregroundColor((timerSeconds > 0 || timerActive) ? .yellow : AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
+                    .accessibilityLabel("Timer")
+                    .accessibilityValue(timerSeconds > 0 ? "\(timerSeconds) seconds" : "Off")
+                    .accessibilityHint("Double tap to set timer delay")
                     
                     // Grid toggle
-                    Button(action: { gridEnabled.toggle() }) {
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        gridEnabled.toggle()
+                    }) {
                         Image(systemName: gridEnabled ? "grid.circle.fill" : "grid")
                             .font(.system(size: AppStyle.IconSize.xl))
                             .foregroundColor(gridEnabled ? .white : AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
+                    .accessibilityLabel("Grid Overlay")
+                    .accessibilityValue(gridEnabled ? "On" : "Off")
+                    .accessibilityHint("Double tap to toggle grid overlay")
                     
                     // Ghost overlay
-                    Button(action: { toggleGhostMode() }) {
+                    Button(action: {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        toggleGhostMode()
+                    }) {
                         Image(systemName: ghostEnabled ? "eye.fill" : "eye")
                             .font(.system(size: AppStyle.IconSize.xl))
                             .foregroundColor(ghostEnabled ? AppStyle.Colors.accentPrimary : AppStyle.Colors.textPrimary)
                             .frame(width: AppStyle.ButtonSize.lg, height: AppStyle.ButtonSize.lg)
                     }
+                    .accessibilityLabel("Ghost Overlay")
+                    .accessibilityValue(ghostEnabled ? "On" : "Off")
+                    .accessibilityHint("Double tap to toggle reference photo overlay")
                 }
                 .padding(.trailing, AppStyle.Spacing.lg)
                 .padding(.bottom, 120) // Position above shutter button
@@ -285,11 +321,14 @@ struct CameraHostView: View {
                                         .stroke(AppStyle.Colors.textPrimary, lineWidth: 2)
                                 )
                         }
+                        .accessibilityLabel("Last Photo")
+                        .accessibilityHint("Double tap to view your last photo")
                     } else {
                         // Placeholder
                         Rectangle()
                             .fill(Color.clear)
                             .frame(width: 60, height: 60)
+                            .accessibilityHidden(true)
                     }
                     
                     // Center: Large shutter button
@@ -310,6 +349,8 @@ struct CameraHostView: View {
                                 .frame(width: 70, height: 70)
                         }
                     }
+                    .accessibilityLabel(timerSeconds > 0 ? "Take Photo with \(timerSeconds) second timer" : "Take Photo")
+                    .accessibilityHint("Double tap to capture a progress photo")
                     .buttonStyle(.plain)
                     .disabled(!camera.canCapture)
                     .opacity(camera.canCapture ? 1 : 0.6)
@@ -652,6 +693,10 @@ struct CameraHostView: View {
     func selectZoomLevel(_ level: CGFloat) {
         AppConstants.Log.camera.debug("🎯 User selected zoom level: \(level)x")
         
+        // Haptic feedback for zoom change
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+        
         // Update UI immediately
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             selectedZoomLevel = level
@@ -663,6 +708,11 @@ struct CameraHostView: View {
     
     func capturePhoto() {
         AppConstants.Log.camera.debug("📸 Capture button pressed")
+        
+        // Haptic feedback for photo capture
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
         camera.capturePhoto()
         // Note: showAdjust will be triggered by onChange(of: camera.latestPhoto)
     }

@@ -87,15 +87,15 @@ struct JourneysView: View {
                     Button {
                         showNew = true
                     } label: {
-                        HStack(spacing: 16) {
+                        HStack(spacing: 12) {
                             Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 36, weight: .bold))
-                            Text("Add Journey").font(.title2.bold())
+                                .font(.system(size: 24, weight: .semibold))
+                            Text("Add Journey").font(.headline)
                         }
                         .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, minHeight: 140)
-                        .glassCard(corner: 24)
-                        .contentShape(RoundedRectangle(cornerRadius: 24))
+                        .frame(maxWidth: .infinity, minHeight: 100)
+                        .glassCard(corner: 16)
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
@@ -131,7 +131,7 @@ struct JourneysView: View {
                             showNew = true
                         }) {
                             Image(systemName: "plus")
-                                .font(.title3)
+                                .font(.body)
                                 .foregroundColor(.white)
                         }
                     }
@@ -204,6 +204,9 @@ struct JourneyDetailView: View {
     @State private var showJourneySettings = false
     @State private var showCompareView = false
     @State private var showWatchView = false
+    @State private var editMode = false
+    @State private var selectedPhotos: Set<UUID> = []
+    @State private var showDeleteConfirmation = false
 
     init(journey: Journey) {
         self.journey = journey
@@ -277,6 +280,8 @@ struct JourneyDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Compare Photos")
+                        .accessibilityHint("View photos side by side for comparison")
                         
                         // Watch Button
                         Button(action: {
@@ -306,6 +311,8 @@ struct JourneyDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Watch Timeline")
+                        .accessibilityHint("View your photos as a timelapse animation")
                     }
                     .padding(.horizontal)
                     
@@ -385,17 +392,57 @@ struct JourneyDetailView: View {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                                 ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
                                     Button(action: {
-                                        selectedPhotoForEdit = photo
+                                        if editMode {
+                                            // Toggle selection in edit mode
+                                            if selectedPhotos.contains(photo.id) {
+                                                selectedPhotos.remove(photo.id)
+                                            } else {
+                                                selectedPhotos.insert(photo.id)
+                                            }
+                                            // Haptic feedback for selection
+                                            let generator = UISelectionFeedbackGenerator()
+                                            generator.selectionChanged()
+                                        } else {
+                                            // Normal mode - open photo editor
+                                            selectedPhotoForEdit = photo
+                                        }
                                     }) {
-                                        PhotoGridItem(photo: photo)
-                                            .onAppear {
-                                                // Load more when reaching near the end
-                                                if index == photos.count - 3 && hasMorePhotos && !isLoadingPhotos {
-                                                    Task {
-                                                        await loadPhotos()
-                                                    }
+                                        ZStack(alignment: .topTrailing) {
+                                            PhotoGridItem(photo: photo)
+                                                .opacity(editMode && selectedPhotos.contains(photo.id) ? 0.7 : 1.0)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(editMode && selectedPhotos.contains(photo.id) ? Color.white : Color.clear, lineWidth: 3)
+                                                )
+                                            
+                                            // Selection indicator in edit mode
+                                            if editMode {
+                                                Image(systemName: selectedPhotos.contains(photo.id) ? "checkmark.circle.fill" : "circle")
+                                                    .font(.title2)
+                                                    .foregroundColor(.white)
+                                                    .background(
+                                                        Circle()
+                                                            .fill(selectedPhotos.contains(photo.id) ? Color.blue : Color.black.opacity(0.5))
+                                                            .frame(width: 30, height: 30)
+                                                    )
+                                                    .padding(8)
+                                            }
+                                        }
+                                        .onAppear {
+                                            // Load more when reaching near the end
+                                            if index == photos.count - 3 && hasMorePhotos && !isLoadingPhotos {
+                                                Task {
+                                                    await loadPhotos()
                                                 }
                                             }
+                                            
+                                            // Prefetch upcoming photos for smooth scrolling
+                                            if index == photos.count - 10 && photos.count >= 10 {
+                                                let upcomingPhotos = Array(photos.suffix(10))
+                                                let gridItemSize = (UIScreen.main.bounds.width - 48) / 3 // 3 columns with padding
+                                                PhotoStore.prefetchPhotos(upcomingPhotos, targetSize: CGSize(width: gridItemSize, height: gridItemSize))
+                                            }
+                                        }
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -439,21 +486,77 @@ struct JourneyDetailView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: {
-                    dismiss()
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.title2)
-                        .foregroundColor(.white)
+                if editMode {
+                    Button("Cancel") {
+                        withAnimation {
+                            editMode = false
+                            selectedPhotos.removeAll()
+                        }
+                    }
+                    .foregroundColor(.white)
+                } else {
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Image(systemName: "chevron.left")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                    }
                 }
             }
             
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    showJourneySettings = true
-                }) {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(.white)
+                if editMode {
+                    HStack(spacing: 16) {
+                        // Delete button
+                        Button(action: {
+                            if !selectedPhotos.isEmpty {
+                                showDeleteConfirmation = true
+                            }
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(selectedPhotos.isEmpty ? .gray : .red)
+                        }
+                        .disabled(selectedPhotos.isEmpty)
+                        
+                        // Select All / Deselect All
+                        Button(action: {
+                            if selectedPhotos.count == photos.count {
+                                selectedPhotos.removeAll()
+                            } else {
+                                selectedPhotos = Set(photos.map { $0.id })
+                            }
+                            // Haptic feedback for selection
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                        }) {
+                            Text(selectedPhotos.count == photos.count ? "Deselect All" : "Select All")
+                                .font(.body)
+                                .foregroundColor(.white)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 16) {
+                        // Edit button for photo management
+                        Button(action: {
+                            withAnimation {
+                                editMode = true
+                            }
+                            // Haptic feedback for entering edit mode
+                            let generator = UIImpactFeedbackGenerator(style: .medium)
+                            generator.impactOccurred()
+                        }) {
+                            Image(systemName: "checkmark.circle")
+                                .foregroundColor(.white)
+                        }
+                        
+                        Button(action: {
+                            showJourneySettings = true
+                        }) {
+                            Image(systemName: "gearshape")
+                                .foregroundColor(.white)
+                        }
+                    }
                 }
             }
         }
@@ -502,6 +605,16 @@ struct JourneyDetailView: View {
         }
         .sheet(isPresented: $showWatchView) {
             JourneyWatchSheet(journey: journey, photos: photos)
+        }
+        .alert("Delete Photos", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete \(selectedPhotos.count) Photo\(selectedPhotos.count == 1 ? "" : "s")", role: .destructive) {
+                Task {
+                    await deleteSelectedPhotos()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete \(selectedPhotos.count) photo\(selectedPhotos.count == 1 ? "" : "s")? This action cannot be undone.")
         }
     }
     
@@ -683,6 +796,58 @@ struct JourneyDetailView: View {
 
         return UIImage(cgImage: downsampledImage)
     }
+    
+    private func deleteSelectedPhotos() async {
+        let photosToDelete = photos.filter { selectedPhotos.contains($0.id) }
+        
+        // Haptic feedback for deletion
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.warning)
+        
+        for photo in photosToDelete {
+            // Delete photo files from app directory
+            do {
+                if let originalId = photo.originalAssetLocalId {
+                    try await PhotoStore.deleteFromAppDirectory(localId: originalId)
+                }
+                try await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
+            } catch {
+                AppConstants.Log.photo.error("Failed to delete photo files: \(error.localizedDescription)")
+            }
+            
+            // Delete photo from database
+            await MainActor.run {
+                ctx.delete(photo)
+                journey.photoCount -= 1
+            }
+        }
+        
+        // Save context
+        do {
+            try await MainActor.run {
+                try ctx.save()
+                AppConstants.Log.photo.info("Deleted \(photosToDelete.count) photos")
+            }
+        } catch {
+            AppConstants.Log.photo.error("Failed to save context after deletion: \(error.localizedDescription)")
+        }
+        
+        // Update UI
+        await MainActor.run {
+            // Remove deleted photos from local array
+            photos.removeAll { selectedPhotos.contains($0.id) }
+            
+            // Clear selection and exit edit mode
+            selectedPhotos.removeAll()
+            withAnimation {
+                editMode = false
+            }
+            
+            // Success haptic
+            let successGenerator = UINotificationFeedbackGenerator()
+            successGenerator.notificationOccurred(.success)
+        }
+    }
 
     private func loadPhotos() async {
         guard !isLoadingPhotos && hasMorePhotos else { return }
@@ -710,6 +875,13 @@ struct JourneyDetailView: View {
                 hasMorePhotos = result.hasMore
                 currentPage += 1
                 isLoadingPhotos = false
+                
+                // Prefetch the first batch of photos for smooth initial scrolling
+                if currentPage == 1 && !result.items.isEmpty {
+                    let gridItemSize = (UIScreen.main.bounds.width - 48) / 3
+                    let photosToPreload = Array(result.items.prefix(15)) // Prefetch first 15 photos
+                    PhotoStore.prefetchPhotos(photosToPreload, targetSize: CGSize(width: gridItemSize, height: gridItemSize))
+                }
             }
 
         } catch {
