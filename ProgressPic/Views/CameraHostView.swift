@@ -223,8 +223,7 @@ struct CameraHostView: View {
                     
                     // Flash toggle
                     Button(action: {
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        HapticFeedback.light()
                         camera.cycleFlashMode()
                     }) {
                         Image(systemName: camera.flashMode == .on ? "bolt.fill" : (camera.flashMode == .auto ? "bolt.badge.automatic" : "bolt.slash"))
@@ -251,8 +250,7 @@ struct CameraHostView: View {
                     
                     // Timer
                     Button(action: {
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        HapticFeedback.light()
                         showTimerControls.toggle()
                         if showTimerControls { showGhostControls = false }
                     }) {
@@ -267,8 +265,7 @@ struct CameraHostView: View {
                     
                     // Grid toggle
                     Button(action: {
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        HapticFeedback.light()
                         gridEnabled.toggle()
                     }) {
                         Image(systemName: gridEnabled ? "grid.circle.fill" : "grid")
@@ -282,8 +279,7 @@ struct CameraHostView: View {
                     
                     // Ghost overlay
                     Button(action: {
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        HapticFeedback.light()
                         toggleGhostMode()
                     }) {
                         Image(systemName: ghostEnabled ? "eye.fill" : "eye")
@@ -693,9 +689,8 @@ struct CameraHostView: View {
         AppConstants.Log.camera.debug("🎯 User selected zoom level: \(level)x")
         
         // Haptic feedback for zoom change
-        let generator = UISelectionFeedbackGenerator()
-        generator.selectionChanged()
-        
+        HapticFeedback.selection()
+
         // Update UI immediately
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             selectedZoomLevel = level
@@ -709,9 +704,8 @@ struct CameraHostView: View {
         AppConstants.Log.camera.debug("📸 Capture button pressed")
         
         // Haptic feedback for photo capture
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-        
+        HapticFeedback.medium()
+
         camera.capturePhoto()
         // Note: showAdjust will be triggered by onChange(of: camera.latestPhoto)
     }
