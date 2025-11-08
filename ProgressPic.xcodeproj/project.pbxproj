@@ -390,7 +390,7 @@
 		0DD0ED162E73273300E9819F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = ProgressPic;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ProgressPic/Resources/ProgressPic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -427,7 +427,7 @@
 		0DD0ED172E73273300E9819F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = ProgressPic;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ProgressPic/Resources/ProgressPic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
