@@ -95,7 +95,9 @@ struct PhotoEditSheet: View {
                                     .clipShape(Circle())
                             }
                             .disabled(!canGoPrevious)
-                            
+                            .accessibilityLabel("Previous photo")
+                            .accessibilityHint(canGoPrevious ? "Navigate to the previous photo" : "No previous photo available")
+
                             Button(action: nextPhoto) {
                                 Image(systemName: "arrow.right")
                                     .font(.title2)
@@ -105,6 +107,8 @@ struct PhotoEditSheet: View {
                                     .clipShape(Circle())
                             }
                             .disabled(!canGoNext)
+                            .accessibilityLabel("Next photo")
+                            .accessibilityHint(canGoNext ? "Navigate to the next photo" : "No next photo available")
                         }
                         .padding(.bottom, AppStyle.Spacing.md)
                         
@@ -131,6 +135,8 @@ struct PhotoEditSheet: View {
                             .font(.title3)
                             .foregroundColor(AppStyle.Colors.textPrimary)
                     }
+                    .accessibilityLabel("Back")
+                    .accessibilityHint("Return to photo list")
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {

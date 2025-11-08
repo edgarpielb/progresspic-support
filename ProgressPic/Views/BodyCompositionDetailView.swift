@@ -148,14 +148,10 @@ struct BodyCompositionDetailView: View {
                             .frame(height: 250)
                             .padding()
                     } else if historicalData.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "chart.line.downtrend.xyaxis")
-                                .font(.system(size: 48))
-                                .foregroundColor(.white.opacity(0.3))
-                            Text("No data for this period")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        }
+                        EmptyStateView(
+                            icon: "chart.line.downtrend.xyaxis",
+                            title: "No data for this period"
+                        )
                         .frame(maxWidth: .infinity)
                         .frame(height: 250)
                         .padding()
@@ -392,67 +388,30 @@ struct BodyCompositionDetailView: View {
     }
     
     private func formatMinValue() -> String {
-        guard !historicalData.isEmpty else { return "--" }
-        let values = historicalData.map { $0.value }
-        let min = values.min() ?? 0
-        
-        switch metricType {
-        case .bodyFat:
-            return String(format: "%.1f %%", min)
-        case .bmi:
-            return String(format: "%.1f", min)
-        case .leanMass, .weight:
-            return String(format: "%.1f kg", min)
-        }
+        let unit = metricType == .bodyFat ? "%" : (metricType == .bmi ? "" : "kg")
+        return StatsFormatters.formatMin(historicalData, valueKeyPath: \.value, unit: unit)
     }
-    
+
     private func formatMaxValue() -> String {
-        guard !historicalData.isEmpty else { return "--" }
-        let values = historicalData.map { $0.value }
-        let max = values.max() ?? 0
-        
-        switch metricType {
-        case .bodyFat:
-            return String(format: "%.1f %%", max)
-        case .bmi:
-            return String(format: "%.1f", max)
-        case .leanMass, .weight:
-            return String(format: "%.1f kg", max)
-        }
+        let unit = metricType == .bodyFat ? "%" : (metricType == .bmi ? "" : "kg")
+        return StatsFormatters.formatMax(historicalData, valueKeyPath: \.value, unit: unit)
     }
-    
+
     private func formatAverageValue() -> String {
-        guard !historicalData.isEmpty else { return "--" }
-        let values = historicalData.map { $0.value }
-        let average = values.reduce(0, +) / Double(values.count)
-        
-        switch metricType {
-        case .bodyFat:
-            return String(format: "%.1f %%", average)
-        case .bmi:
-            return String(format: "%.1f", average)
-        case .leanMass, .weight:
-            return String(format: "%.1f kg", average)
-        }
+        let unit = metricType == .bodyFat ? "%" : (metricType == .bmi ? "" : "kg")
+        return StatsFormatters.formatAverage(historicalData, valueKeyPath: \.value, unit: unit)
     }
-    
+
     private func calculateYDomain() -> ClosedRange<Double> {
-        guard !historicalData.isEmpty else { return 0...100 }
-        
-        let values = historicalData.map { $0.value }
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 100
-        
-        // Add some padding (10% on each side)
-        let range = maxValue - minValue
-        let padding = Swift.max(range * 0.1, 1.0) // At least 1 unit of padding
-        
-        let lowerBound = Swift.max(0, minValue - padding)
-        let upperBound = maxValue + padding
-        
-        return lowerBound...upperBound
+        StatsFormatters.calculateYDomain(
+            for: historicalData,
+            valueKeyPath: \.value,
+            paddingPercent: 0.1,
+            minPadding: 1.0,
+            allowNegative: false
+        )
     }
-    
+
     private func formatValue(_ value: Double) -> String {
         switch metricType {
         case .bodyFat:
@@ -480,17 +439,12 @@ struct BodyCompositionDetailView: View {
               let last = historicalData.last?.date else {
             return ""
         }
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d MMM yyyy"
-        
-        return "\(formatter.string(from: first))-\(formatter.string(from: last))"
+
+        return DateFormatters.formatDateRange(from: first, to: last)
     }
-    
+
     private func formatFullDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
+        DateFormatters.formatFullDate(date)
     }
     
     private func formatComparisonRange(_ range: ClosedRange<Double>) -> String {

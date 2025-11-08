@@ -215,15 +215,12 @@ struct JourneyWatchView: View {
             .fill(AppStyle.Colors.panel)
             .frame(height: 200)
             .overlay(
-                VStack(spacing: 8) {
-                    Image(systemName: "play.rectangle")
-                        .font(.title2)
-                        .foregroundColor(AppStyle.Colors.textTertiary)
-                    Text("Add photos to watch your progress")
-                        .font(AppStyle.FontStyle.body)
-                        .foregroundColor(AppStyle.Colors.textSecondary)
-                        .multilineTextAlignment(.center)
-                }
+                EmptyStateView(
+                    icon: "play.rectangle",
+                    title: "Add photos to watch your progress",
+                    iconSize: 32,
+                    spacing: 8
+                )
             )
     }
     
