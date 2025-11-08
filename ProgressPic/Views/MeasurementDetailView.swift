@@ -450,59 +450,38 @@ struct MeasurementDetailView: View {
               let last = filteredEntries.last?.date else {
             return ""
         }
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d MMM yyyy"
-        
-        return "\(formatter.string(from: first)) - \(formatter.string(from: last))"
+
+        return DateFormatters.formatDateRange(from: first, to: last)
     }
     
     private func formatMinValue() -> String {
-        guard !filteredEntries.isEmpty else { return "--" }
-        let values = filteredEntries.map { $0.value }
-        let min = values.min() ?? 0
-        return String(format: "%.1f cm", min)
+        StatsFormatters.formatMin(filteredEntries, valueKeyPath: \.value, unit: "cm")
     }
-    
+
     private func formatMaxValue() -> String {
-        guard !filteredEntries.isEmpty else { return "--" }
-        let values = filteredEntries.map { $0.value }
-        let max = values.max() ?? 0
-        return String(format: "%.1f cm", max)
+        StatsFormatters.formatMax(filteredEntries, valueKeyPath: \.value, unit: "cm")
     }
-    
+
     private func formatAverageValue() -> String {
-        guard !filteredEntries.isEmpty else { return "--" }
-        let values = filteredEntries.map { $0.value }
-        let average = values.reduce(0, +) / Double(values.count)
-        return String(format: "%.1f cm", average)
+        StatsFormatters.formatAverage(filteredEntries, valueKeyPath: \.value, unit: "cm")
     }
-    
+
     private func formatFullDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
+        DateFormatters.formatFullDate(date)
     }
-    
+
     private func formatComparisonRange(_ range: ClosedRange<Double>) -> String {
         return String(format: "%.1f-%.1f cm", range.lowerBound, range.upperBound)
     }
     
     private func calculateYDomain() -> ClosedRange<Double> {
-        guard !aggregatedEntries.isEmpty else { return 0...100 }
-        
-        let values = aggregatedEntries.map { $0.value }
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 100
-        
-        // Add some padding (10% on each side)
-        let range = maxValue - minValue
-        let padding = Swift.max(range * 0.1, 1.0) // At least 1 unit of padding
-        
-        let lowerBound = Swift.max(0, minValue - padding)
-        let upperBound = maxValue + padding
-        
-        return lowerBound...upperBound
+        StatsFormatters.calculateYDomain(
+            for: aggregatedEntries,
+            valueKeyPath: \.value,
+            paddingPercent: 0.1,
+            minPadding: 1.0,
+            allowNegative: false
+        )
     }
     
     private func getAllXAxisDates() -> [Date] {
