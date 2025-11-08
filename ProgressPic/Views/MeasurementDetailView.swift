@@ -421,8 +421,7 @@ struct MeasurementDetailView: View {
     
     private func exportToCSV() {
         // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
+        HapticFeedback.medium()
         
         // Export filtered entries to CSV
         guard let csvData = ExportService.exportMeasurementsToCSV(entries: filteredEntries, journey: journey) else {

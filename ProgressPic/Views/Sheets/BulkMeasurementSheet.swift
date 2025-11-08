@@ -147,9 +147,8 @@ struct BulkMeasurementSheet: View {
     
     func loadLastValues() {
         // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
-        
+        HapticFeedback.light()
+
         // Load saved values
         if let value = MeasurementMemory.get(type: .chest) {
             chest = String(format: "%.1f", value)
@@ -202,11 +201,10 @@ struct BulkMeasurementSheet: View {
         saveMeasurement(type: .thighRight, value: thighRight)
         saveMeasurement(type: .calfLeft, value: calfLeft)
         saveMeasurement(type: .calfRight, value: calfRight)
-        
+
         // Haptic success feedback
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.success)
-        
+        HapticFeedback.success()
+
         dismiss()
     }
     
