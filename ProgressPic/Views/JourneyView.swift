@@ -362,27 +362,19 @@ struct JourneyDetailView: View {
                             // Initial loading state
                             VStack(spacing: 16) {
                                 Spacer()
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(1.2)
-                                Text("Loading photos...")
-                                    .foregroundColor(.white.opacity(0.7))
+                                LoadingStateView(message: "Loading photos...", scale: 1.2)
                                 Spacer()
                             }
                         } else if photos.isEmpty {
                             // Empty state
                             VStack(spacing: 16) {
                                 Spacer()
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.system(size: 64))
-                                    .foregroundColor(.white.opacity(0.3))
-                                Text("No photos yet")
-                                    .font(.title3)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text("Take your first photo to start your journey!")
-                                    .font(.body)
-                                    .foregroundColor(.white.opacity(0.5))
-                                    .multilineTextAlignment(.center)
+                                EmptyStateView(
+                                    icon: "photo.on.rectangle.angled",
+                                    title: "No photos yet",
+                                    subtitle: "Take your first photo to start your journey!",
+                                    iconSize: 64
+                                )
                                 Spacer()
                             }
                             .padding(.horizontal, 40)

@@ -199,17 +199,11 @@ struct MeasurementDetailView: View {
                     
                     // Chart
                     if filteredEntries.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "chart.line.downtrend.xyaxis")
-                                .font(.system(size: 48))
-                                .foregroundColor(.white.opacity(0.3))
-                            Text("No data for this period")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            Text("Add measurements to see your progress")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        EmptyStateView(
+                            icon: "chart.line.downtrend.xyaxis",
+                            title: "No data for this period",
+                            subtitle: "Add measurements to see your progress"
+                        )
                         .frame(maxWidth: .infinity)
                         .frame(height: 250)
                         .padding()

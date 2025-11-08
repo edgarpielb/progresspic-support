@@ -148,14 +148,10 @@ struct BodyCompositionDetailView: View {
                             .frame(height: 250)
                             .padding()
                     } else if historicalData.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "chart.line.downtrend.xyaxis")
-                                .font(.system(size: 48))
-                                .foregroundColor(.white.opacity(0.3))
-                            Text("No data for this period")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        }
+                        EmptyStateView(
+                            icon: "chart.line.downtrend.xyaxis",
+                            title: "No data for this period"
+                        )
                         .frame(maxWidth: .infinity)
                         .frame(height: 250)
                         .padding()
