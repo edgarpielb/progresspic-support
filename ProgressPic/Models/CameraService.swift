@@ -245,26 +245,26 @@ final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
         AppConstants.Log.camera.debug("🔄 Flipping camera (front: \(oldValue) -> \(newValue))")
 
         // Stop session before reconfiguring to prevent race conditions
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task {
             if self.session.isRunning {
                 AppConstants.Log.camera.debug("⏸️ Stopping session before flip")
                 self.session.stopRunning()
             }
 
-            // Wait a moment for the session to fully stop
-            Thread.sleep(forTimeInterval: 0.1)
+            // Wait a moment for the session to fully stop (non-blocking)
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
 
             // Now reconfigure with the new camera (this will update orientation correctly)
             self.configureSession(front: newValue)
 
             // Update isFront state on main thread after configuration starts
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.isFront = newValue
                 self.currentDevice = nil  // Reset currentDevice when flipping cameras
             }
 
             // Force preview layer update on main thread
-            DispatchQueue.main.async {
+            await MainActor.run {
                 // Trigger a rebinding by temporarily setting to nil, then back
                 let currentSession = self.session
                 self.previewLayer?.session = nil

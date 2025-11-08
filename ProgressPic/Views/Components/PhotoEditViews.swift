@@ -159,8 +159,11 @@ struct PhotoEditSheet: View {
             .onChange(of: showAdjustView) { _, isShowing in
                 // Reload image when adjust sheet is dismissed to show updated transform
                 if !isShowing {
-                    // Clear cache and reload to show updated transform
-                    imageCache.removeAll() // Clear ALL cached images to force reload
+                    // Invalidate cache only for the edited photo
+                    PhotoStore.invalidateCache(for: currentPhoto.assetLocalId)
+                    if currentPhoto.originalAssetLocalId != currentPhoto.assetLocalId {
+                        PhotoStore.invalidateCache(for: currentPhoto.originalAssetLocalId)
+                    }
                     image = nil
                     Task {
                         // Wait a moment for SwiftData to propagate changes
@@ -488,9 +491,14 @@ struct PhotoEditSheet: View {
         ctx.delete(currentPhoto)
         try? ctx.save()
 
-        // Delete file
+        // Delete both cropped and original photo files
         Task {
             try? await PhotoStore.deleteFromAppDirectory(localId: photoToDelete.assetLocalId)
+
+            // Delete the original file if it's different from cropped
+            if photoToDelete.originalAssetLocalId != photoToDelete.assetLocalId {
+                try? await PhotoStore.deleteFromAppDirectory(localId: photoToDelete.originalAssetLocalId)
+            }
         }
 
         // Notify parent view that photo was deleted

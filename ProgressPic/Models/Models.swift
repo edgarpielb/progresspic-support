@@ -67,6 +67,10 @@ final class Journey {
 
 @Model
 final class ProgressPhoto {
+    #Index<ProgressPhoto>([\.journeyId, \.date])
+    #Index<ProgressPhoto>([\.journeyId])
+    #Index<ProgressPhoto>([\.date])
+
     var id: UUID = UUID()
     var journeyId: UUID = UUID()        // denormalized for convenience
     var date: Date = Date.now
@@ -94,6 +98,9 @@ final class ProgressPhoto {
 
 @Model
 final class MeasurementEntry {
+    #Index<MeasurementEntry>([\.journeyId, \.date])
+    #Index<MeasurementEntry>([\.journeyId, \.typeRaw])
+
     var id: UUID = UUID()
     var journeyId: UUID = UUID()
     var date: Date = Date.now
@@ -101,7 +108,7 @@ final class MeasurementEntry {
     var value: Double = 0.0
     var unitRaw: String = "kg"
     var label: String? = nil
-    
+
     var journey: Journey? = nil
 
     var type: MeasurementType { get { MeasurementType(rawValue: typeRaw) ?? .weight }

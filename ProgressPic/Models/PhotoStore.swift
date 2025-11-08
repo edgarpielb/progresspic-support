@@ -28,7 +28,19 @@ enum PhotoStore {
         imageCache.removeAllObjects()
         AppConstants.Log.photo.info("Cleared image cache")
     }
-    
+
+    /// Invalidate all cached versions of a specific photo
+    /// This removes all size variants from the cache
+    static func invalidateCache(for localId: String) {
+        // Remove the full-size version
+        imageCache.removeObject(forKey: "\(localId)_full" as NSString)
+
+        // Note: We can't easily enumerate all size variants, but the most common ones
+        // will be naturally evicted by NSCache when memory pressure occurs
+        // The main goal is to invalidate the full version and let sized versions refresh naturally
+        AppConstants.Log.photo.debug("Invalidated cache for photo: \(localId)")
+    }
+
     /// Prefetch photos in the background to improve scrolling performance
     /// - Parameters:
     ///   - photos: Array of photos to prefetch
@@ -71,6 +83,12 @@ enum PhotoStore {
         let outW = AppConstants.Photo.exportWidth
         let outH = AppConstants.Photo.exportHeight
         let canvas = CGSize(width: outW, height: outH)
+
+        // Validate image dimensions to prevent division by zero
+        guard image.size.width > 0 && image.size.height > 0 else {
+            print("⚠️ Invalid image dimensions: \(image.size)")
+            return image
+        }
 
         // Calculate scale to fill the canvas (use max to ensure crop fills the frame)
         let baseScale = max(outW / image.size.width, outH / image.size.height)

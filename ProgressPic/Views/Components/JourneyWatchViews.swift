@@ -178,6 +178,10 @@ struct JourneyWatchView: View {
                 currentIndex = chronologicalPhotos.count - 1
             }
         }
+        .onChange(of: currentIndex) { _, newIndex in
+            // Update sliding window when user navigates to different photo
+            updateSlidingWindow(currentIndex: newIndex)
+        }
         .onDisappear {
             isPlaying = false
         }
@@ -703,17 +707,18 @@ struct JourneyWatchView: View {
             preloadProgress = 0
         }
 
-        let totalPhotos = chronologicalPhotos.count
+        // Use sliding window approach: load initial window of photos (first 20)
+        let initialWindowSize = min(20, chronologicalPhotos.count)
         var loadedImages: [String: UIImage] = [:]
 
-        for (index, photo) in chronologicalPhotos.enumerated() {
-            // Always load from assetLocalId for display (already transformed)
-            if let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 2400, height: 2400)) {
+        for index in 0..<initialWindowSize {
+            let photo = chronologicalPhotos[index]
+            // Load at reasonable resolution (2400x2400 -> 1200x1200)
+            if let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 1200, height: 1200)) {
                 loadedImages[photo.assetLocalId] = image
-                print("📸 Loaded image for watch view")
             }
 
-            let progress = Double(index + 1) / Double(totalPhotos)
+            let progress = Double(index + 1) / Double(initialWindowSize)
             await MainActor.run {
                 preloadProgress = progress
             }
@@ -722,7 +727,43 @@ struct JourneyWatchView: View {
         await MainActor.run {
             preloadedImages = loadedImages
             isPreloading = false
-            print("✅ Preloaded \(loadedImages.count) images for watch view")
+            print("✅ Preloaded initial \(loadedImages.count) images for watch view (sliding window)")
+        }
+    }
+
+    // Load more images as user advances through slideshow
+    private func updateSlidingWindow(currentIndex: Int) {
+        Task {
+            guard !chronologicalPhotos.isEmpty else { return }
+
+            // Define sliding window: 5 photos before, 15 photos after current
+            let windowStart = max(0, currentIndex - 5)
+            let windowEnd = min(chronologicalPhotos.count, currentIndex + 15)
+
+            var updatedImages = preloadedImages
+
+            // Remove images outside the window to free memory
+            for (localId, _) in updatedImages {
+                if let photoIndex = chronologicalPhotos.firstIndex(where: { $0.assetLocalId == localId }) {
+                    if photoIndex < windowStart || photoIndex >= windowEnd {
+                        updatedImages.removeValue(forKey: localId)
+                    }
+                }
+            }
+
+            // Load images within window that aren't loaded yet
+            for index in windowStart..<windowEnd {
+                let photo = chronologicalPhotos[index]
+                if updatedImages[photo.assetLocalId] == nil {
+                    if let image = await PhotoStore.fetchUIImage(localId: photo.assetLocalId, targetSize: CGSize(width: 1200, height: 1200)) {
+                        updatedImages[photo.assetLocalId] = image
+                    }
+                }
+            }
+
+            await MainActor.run {
+                preloadedImages = updatedImages
+            }
         }
     }
     

@@ -273,6 +273,12 @@ struct AdjustView: View {
         // Image will be .scaledToFit() within the crop area
         // Then we apply scaleEffect to zoom it to fill
 
+        // Validate dimensions to prevent division by zero
+        guard imageSize.width > 0 && imageSize.height > 0 && cropSize.width > 0 && cropSize.height > 0 else {
+            print("⚠️ Invalid dimensions - imageSize: \(imageSize), cropSize: \(cropSize)")
+            return
+        }
+
         let imageAspect = imageSize.width / imageSize.height
         let cropAspect = cropSize.width / cropSize.height  // 4:5 = 0.8
 

@@ -380,9 +380,11 @@ struct YearCalendarSheet: View {
         guard let bestMonthNum = monthCounts.max(by: { $0.value < $1.value })?.key else {
             return "N/A"
         }
-        
+
         let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        return monthNames[bestMonthNum - 1]
+        let index = bestMonthNum - 1
+        guard index >= 0 && index < monthNames.count else { return "N/A" }
+        return monthNames[index]
     }
     
     private func calculateAveragePhotosPerWeek() -> String {
@@ -435,9 +437,9 @@ private struct MonthView: View {
     @State private var today: Date = Date()
     
     private func calculateWeeks() -> [[Date?]] {
-        guard !days.isEmpty else { return [] }
+        guard !days.isEmpty, let firstDay = days.first else { return [] }
         let cal = Calendar.current
-        let firstWeekday = cal.component(.weekday, from: days.first!)
+        let firstWeekday = cal.component(.weekday, from: firstDay)
         let startingColumn = (firstWeekday + 5) % 7
         return createWeeks(days: days, startingColumn: startingColumn)
     }

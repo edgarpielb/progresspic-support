@@ -115,9 +115,9 @@ struct MeasurementDetailView: View {
                     .padding(.top, 8)
                     
                     // Left/Right Toggle (only for paired measurements)
-                    if initialMeasurementType.hasPairedVariant {
+                    if initialMeasurementType.hasPairedVariant, let pairedType = initialMeasurementType.pairedMeasurement {
                         HStack(spacing: 12) {
-                            ForEach([initialMeasurementType, initialMeasurementType.pairedMeasurement!], id: \.self) { side in
+                            ForEach([initialMeasurementType, pairedType], id: \.self) { side in
                                 Button(action: {
                                     selectedSide = side
                                 }) {
