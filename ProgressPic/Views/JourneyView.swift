@@ -71,8 +71,7 @@ struct JourneysView: View {
                             editMode = .active
                         }
                         // Haptic feedback
-                        let generator = UIImpactFeedbackGenerator(style: .medium)
-                        generator.impactOccurred()
+                        HapticFeedback.medium()
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -400,8 +399,7 @@ struct JourneyDetailView: View {
                                                 selectedPhotos.insert(photo.id)
                                             }
                                             // Haptic feedback for selection
-                                            let generator = UISelectionFeedbackGenerator()
-                                            generator.selectionChanged()
+                                            HapticFeedback.selection()
                                         } else {
                                             // Normal mode - open photo editor
                                             selectedPhotoForEdit = photo
@@ -527,8 +525,7 @@ struct JourneyDetailView: View {
                                 selectedPhotos = Set(photos.map { $0.id })
                             }
                             // Haptic feedback for selection
-                            let generator = UIImpactFeedbackGenerator(style: .light)
-                            generator.impactOccurred()
+                            HapticFeedback.light()
                         }) {
                             Text(selectedPhotos.count == photos.count ? "Deselect All" : "Select All")
                                 .font(.body)
@@ -543,8 +540,7 @@ struct JourneyDetailView: View {
                                 editMode = true
                             }
                             // Haptic feedback for entering edit mode
-                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                            generator.impactOccurred()
+                            HapticFeedback.medium()
                         }) {
                             Image(systemName: "checkmark.circle")
                                 .foregroundColor(.white)
@@ -801,8 +797,7 @@ struct JourneyDetailView: View {
         let photosToDelete = photos.filter { selectedPhotos.contains($0.id) }
         
         // Haptic feedback for deletion
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.warning)
+        HapticFeedback.warning()
         
         for photo in photosToDelete {
             // Delete photo files from app directory
@@ -844,8 +839,7 @@ struct JourneyDetailView: View {
             }
             
             // Success haptic
-            let successGenerator = UINotificationFeedbackGenerator()
-            successGenerator.notificationOccurred(.success)
+            HapticFeedback.success()
         }
     }
 

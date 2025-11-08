@@ -10,8 +10,8 @@ struct ProgressPicApp: App {
         // To enable iCloud: Ensure Capabilities > iCloud > CloudKit is ON in Xcode.
         // Container ID: Use automatic or specify your own (e.g., "iCloud.com.yourdomain.ProgressPic")
         do {
-            let schema = Schema([Journey.self, ProgressPhoto.self, MeasurementEntry.self])
-            
+            let schema = Schema([Journey.self, ProgressPhoto.self, MeasurementEntry.self, JourneyReminder.self])
+
             // Check if iCloud is available
             let isICloudAvailable = FileManager.default.ubiquityIdentityToken != nil
             
@@ -44,7 +44,7 @@ struct ProgressPicApp: App {
             print("❌ Failed to create ModelContainer: \(error)")
             // Create a fallback in-memory container
             do {
-                let schema = Schema([Journey.self, ProgressPhoto.self, MeasurementEntry.self])
+                let schema = Schema([Journey.self, ProgressPhoto.self, MeasurementEntry.self, JourneyReminder.self])
                 let fallbackConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
                 container = try ModelContainer(for: schema, configurations: fallbackConfig)
                 print("⚠️ Using fallback in-memory container")

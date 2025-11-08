@@ -313,7 +313,23 @@ struct JourneySettingsView: View {
     }
     
     private func deleteJourney() {
-        // Delete the journey from the context
+        // Delete all photo files associated with this journey before deleting the journey
+        if let photos = journey.photos {
+            Task {
+                for photo in photos {
+                    // Delete the cropped photo file
+                    try? await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
+
+                    // Delete the original photo file if it's different from cropped
+                    if photo.originalAssetLocalId != photo.assetLocalId {
+                        try? await PhotoStore.deleteFromAppDirectory(localId: photo.originalAssetLocalId)
+                    }
+                }
+                print("✅ Deleted \(photos.count) photo files for journey '\(journey.name)'")
+            }
+        }
+
+        // Delete the journey from the context (this cascade-deletes photos and measurements)
         ctx.delete(journey)
 
         // Process pending changes to ensure deletion is registered

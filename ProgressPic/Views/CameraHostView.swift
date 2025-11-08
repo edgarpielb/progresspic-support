@@ -238,8 +238,7 @@ struct CameraHostView: View {
                     
                     // Camera flip
                     Button(action: {
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        HapticFeedback.light()
                         camera.flip()
                     }) {
                         Image(systemName: "arrow.triangle.2.circlepath.camera")

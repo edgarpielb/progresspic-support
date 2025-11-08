@@ -3,14 +3,28 @@ import UIKit
 
 /// Centralized transform rendering utilities to ensure consistent image display across the app
 struct TransformRenderer {
-    
+    // Shared CIContext for better performance (expensive to create)
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    // Cache for blurred backgrounds (localId -> blurred UIImage)
+    private static var blurCache = NSCache<NSString, UIImage>()
+
+    static func clearBlurCache() {
+        blurCache.removeAllObjects()
+    }
+
+    static func invalidateBlurCache(for localId: String) {
+        blurCache.removeObject(forKey: localId as NSString)
+    }
+
     /// Renders an image with the exact same transform logic as the SwiftUI adjust view
     /// This ensures that what the user sees in adjust view appears everywhere else
     static func renderTransformedImage(
         sourceImage: UIImage,
         transform: AlignTransform,
         targetSize: CGSize? = nil,
-        adjustViewSize: CGSize? = nil  // The size of the crop frame in adjust view
+        adjustViewSize: CGSize? = nil,  // The size of the crop frame in adjust view
+        cacheKey: String? = nil  // Optional cache key for blur optimization
     ) -> UIImage {
         // Use provided size or default to a standard 4:5 output
         let outputSize: CGSize
@@ -47,7 +61,8 @@ struct TransformRenderer {
             drawBlurredBackground(
                 sourceImage: sourceImage,
                 in: ctx.cgContext,
-                size: outputSize
+                size: outputSize,
+                cacheKey: cacheKey
             )
 
             // Calculate how the image fits within the crop (matching SwiftUI's scaledToFit logic)
@@ -129,7 +144,8 @@ struct TransformRenderer {
     private static func drawBlurredBackground(
         sourceImage: UIImage,
         in context: CGContext,
-        size: CGSize
+        size: CGSize,
+        cacheKey: String? = nil
     ) {
         // Fill with dark background first
         context.setFillColor(UIColor(red: 30/255, green: 32/255, blue: 35/255, alpha: 1.0).cgColor)
@@ -162,31 +178,44 @@ struct TransformRenderer {
             )
         }
         
-        // Apply blur directly to the source image
-        guard let ciImage = CIImage(image: sourceImage) else {
-            return
+        // Check cache first
+        var blurredUIImage: UIImage?
+        if let key = cacheKey, let cached = blurCache.object(forKey: key as NSString) {
+            blurredUIImage = cached
+        } else {
+            // Apply blur directly to the source image
+            guard let ciImage = CIImage(image: sourceImage) else {
+                return
+            }
+
+            // Store the original extent before blurring
+            let originalExtent = ciImage.extent
+
+            // Apply Gaussian blur
+            let blurFilter = CIFilter(name: "CIGaussianBlur")
+            blurFilter?.setValue(ciImage, forKey: kCIInputImageKey)
+            blurFilter?.setValue(50.0, forKey: kCIInputRadiusKey) // Strong blur
+
+            guard let blurredCIImage = blurFilter?.outputImage else {
+                return
+            }
+
+            // Crop the blurred image back to the original extent (before blur expanded it)
+            let croppedBlurred = blurredCIImage.cropped(to: originalExtent)
+
+            // Render the blurred image using shared CIContext
+            if let cgImage = ciContext.createCGImage(croppedBlurred, from: originalExtent) {
+                // Create UIImage respecting the original orientation
+                blurredUIImage = UIImage(cgImage: cgImage, scale: sourceImage.scale, orientation: sourceImage.imageOrientation)
+
+                // Cache the result
+                if let key = cacheKey, let blurred = blurredUIImage {
+                    blurCache.setObject(blurred, forKey: key as NSString)
+                }
+            }
         }
-        
-        // Store the original extent before blurring
-        let originalExtent = ciImage.extent
 
-        // Apply Gaussian blur
-        let blurFilter = CIFilter(name: "CIGaussianBlur")
-        blurFilter?.setValue(ciImage, forKey: kCIInputImageKey)
-        blurFilter?.setValue(50.0, forKey: kCIInputRadiusKey) // Strong blur
-
-        guard let blurredCIImage = blurFilter?.outputImage else {
-            return
-        }
-
-        // Crop the blurred image back to the original extent (before blur expanded it)
-        let croppedBlurred = blurredCIImage.cropped(to: originalExtent)
-
-        // Render the blurred image
-        let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-        if let cgImage = ciContext.createCGImage(croppedBlurred, from: originalExtent) {
-            // Create UIImage respecting the original orientation
-            let blurredUIImage = UIImage(cgImage: cgImage, scale: sourceImage.scale, orientation: sourceImage.imageOrientation)
+        if let blurredUIImage = blurredUIImage {
             
             context.saveGState()
             

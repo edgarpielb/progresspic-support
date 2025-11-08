@@ -160,12 +160,12 @@ struct ActivityView: View {
         }
         
         guard !allActivityDays.isEmpty else { return 0 }
-        
+
         let days = Array(allActivityDays).sorted()
-        let lastActivityDay = days.last!
-        
+        guard let lastActivityDay = days.last else { return 0 }
+
         // Check if last activity was today or yesterday
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        guard let yesterday = cal.date(byAdding: .day, value: -1, to: today) else { return 0 }
         
         guard cal.isDate(lastActivityDay, inSameDayAs: today) || cal.isDate(lastActivityDay, inSameDayAs: yesterday) else {
             return 0
