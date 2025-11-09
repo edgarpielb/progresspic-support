@@ -300,11 +300,10 @@ struct JourneyTemplateSelectionView: View {
     
     private func createJourneyFromTemplate() {
         guard let template = selectedTemplate else { return }
-        
+
         // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-        
+        HapticFeedback.medium()
+
         // Create journey
         let journey = Journey(
             name: template.name,

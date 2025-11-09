@@ -190,9 +190,8 @@ struct ActivityView: View {
     
     private func exportAllMeasurements() {
         // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-        
+        HapticFeedback.medium()
+
         // Fetch all measurement entries
         do {
             let allMeasurements = try ctx.fetch(FetchDescriptor<MeasurementEntry>(sortBy: [SortDescriptor(\.date, order: .forward)]))
