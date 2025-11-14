@@ -11,14 +11,19 @@ ProgressPicTests/
 │   │   ├── StatsFormattersTests.swift       (32 tests)
 │   │   ├── DateFormattersTests.swift        (35 tests)
 │   │   └── HapticFeedbackTests.swift        (18 tests)
-│   └── Models/
-│       ├── MeasurementTypeTests.swift       (25 tests)
-│       ├── UserProfileTests.swift           (30 tests)
-│       └── AlignTransformTests.swift        (25 tests)
+│   ├── Models/
+│   │   ├── MeasurementTypeTests.swift       (25 tests)
+│   │   ├── UserProfileTests.swift           (30 tests)
+│   │   ├── AlignTransformTests.swift        (25 tests)
+│   │   ├── MeasureUnitTests.swift           (30 tests)
+│   │   └── ModelRelationshipTests.swift     (25 tests)
+│   └── Services/
+│       ├── HealthKitServiceTests.swift      (35 tests)
+│       └── CameraServiceTests.swift         (45 tests)
 └── Integration/
     └── PhotoStoreTests.swift                (30 tests)
 
-Total: ~195 unit and integration tests
+Total: ~330 unit and integration tests
 ```
 
 ## Coverage Summary
@@ -33,8 +38,12 @@ Total: ~195 unit and integration tests
 | MeasurementType | MeasurementTypeTests.swift | 25 | 95%+ |
 | UserProfile | UserProfileTests.swift | 30 | 90%+ |
 | AlignTransform | AlignTransformTests.swift | 25 | 95%+ |
+| MeasureUnit | MeasureUnitTests.swift | 30 | 95%+ |
+| Model Relationships | ModelRelationshipTests.swift | 25 | 85%+ |
 | **Services** | | | |
 | PhotoStore | PhotoStoreTests.swift | 30 | 80%+ |
+| HealthKitService | HealthKitServiceTests.swift | 35 | 75%+ |
+| CameraService | CameraServiceTests.swift | 45 | 70%+ |
 
 ## Running Tests
 
@@ -76,6 +85,15 @@ xcodebuild test -scheme ProgressPic -enableCodeCoverage YES
   - Age calculation edge cases
   - Codable serialization
   - Corrupted data handling
+
+#### ModelRelationshipTests ⚠️ CRITICAL
+- **Purpose**: Validate SwiftData relationships and cascade deletes
+- **Key Tests**:
+  - Journey → Photo relationships
+  - Journey → Measurement relationships
+  - Journey → Reminder relationships
+  - Cascade delete verification
+  - Query performance with indexes
 
 ### High-Value Unit Tests
 
@@ -126,18 +144,23 @@ Tests verifying expected behavior without side effects:
 ## Known Limitations
 
 ### Not Currently Tested
-1. **SwiftData Relationships**: Cascade deletes require SwiftData context
-2. **CameraService**: Requires device/simulator with camera
-3. **HealthKitService**: Requires HealthKit mocking
-4. **UI Components**: Require XCUITest framework
-5. **CloudKit Sync**: Requires CloudKit environment
+1. **UI Components**: Require XCUITest framework
+2. **CloudKit Sync**: Requires CloudKit environment
+3. **Video Export**: Requires AVFoundation mocking
+4. **Notification Scheduling**: Requires UNUserNotificationCenter mocking
+
+### Recently Added
+- ✅ SwiftData model relationship tests
+- ✅ Camera service tests (state management)
+- ✅ HealthKit service tests (authorization, data structure)
+- ✅ MeasureUnit enum tests
 
 ### Future Test Additions
-- SwiftData model relationship tests
-- Camera capture workflow tests
-- HealthKit data fetching tests
 - UI automation tests with XCUITest
+- Video export workflow tests
+- Notification reminder tests
 - Performance benchmarks
+- Accessibility tests
 
 ## Test Best Practices
 
