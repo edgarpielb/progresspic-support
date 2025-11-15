@@ -188,6 +188,7 @@ final class PerformanceBenchmarkTests: XCTestCase {
 
     // MARK: - CameraViewModel Performance Tests
 
+    @MainActor
     func testCameraViewModel_ToggleGhostPhoto_Performance() {
         let viewModel = CameraViewModel()
 
@@ -198,6 +199,7 @@ final class PerformanceBenchmarkTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testCameraViewModel_TimerTick_Performance() {
         let viewModel = CameraViewModel()
         viewModel.startCountdown(seconds: 10)
@@ -259,7 +261,7 @@ final class PerformanceBenchmarkTests: XCTestCase {
     }
 
     func testLargeDataSet_Sorting_Performance() {
-        let data = (0..<1000).map { TestDataPoint(value: Double.random(in: 0...1000)) }
+        let data = (0..<1000).map { _ in TestDataPoint(value: Double.random(in: 0...1000)) }
 
         measure {
             _ = data.sorted { $0.value < $1.value }

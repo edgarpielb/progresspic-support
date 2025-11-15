@@ -209,7 +209,11 @@ final class UserProfileTests: XCTestCase {
         let loadedProfile = UserProfile.load()
 
         // Verify all fields match
-        XCTAssertEqual(loadedProfile.birthDate?.timeIntervalSince1970, birthDate.timeIntervalSince1970, accuracy: 1.0)
+        if let loadedBirthDate = loadedProfile.birthDate {
+            XCTAssertEqual(loadedBirthDate.timeIntervalSince1970, birthDate.timeIntervalSince1970, accuracy: 1.0)
+        } else {
+            XCTFail("Birth date should not be nil")
+        }
         XCTAssertEqual(loadedProfile.heightCm, 175.5)
         XCTAssertEqual(loadedProfile.gender, .male)
         XCTAssertEqual(loadedProfile.preferredUnit, .kg)

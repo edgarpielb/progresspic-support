@@ -67,9 +67,10 @@ final class Journey {
 
 @Model
 final class ProgressPhoto {
-    #Index<ProgressPhoto>([\.journeyId, \.date])
-    #Index<ProgressPhoto>([\.journeyId])
-    #Index<ProgressPhoto>([\.date])
+    // NOTE: #Index requires iOS 18.0+, commented out for iOS 17.0 compatibility
+    // #Index<ProgressPhoto>([\.journeyId, \.date])
+    // #Index<ProgressPhoto>([\.journeyId])
+    // #Index<ProgressPhoto>([\.date])
 
     var id: UUID = UUID()
     var journeyId: UUID = UUID()        // denormalized for convenience
@@ -98,8 +99,9 @@ final class ProgressPhoto {
 
 @Model
 final class MeasurementEntry {
-    #Index<MeasurementEntry>([\.journeyId, \.date])
-    #Index<MeasurementEntry>([\.journeyId, \.typeRaw])
+    // NOTE: #Index requires iOS 18.0+, commented out for iOS 17.0 compatibility
+    // #Index<MeasurementEntry>([\.journeyId, \.date])
+    // #Index<MeasurementEntry>([\.journeyId, \.typeRaw])
 
     var id: UUID = UUID()
     var journeyId: UUID = UUID()

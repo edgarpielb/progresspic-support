@@ -7,7 +7,7 @@ final class MeasureUnitTests: XCTestCase {
 
     // MARK: - All Cases Tests
 
-    func testAllCases_Contains AllExpectedUnits() {
+    func testAllCases_ContainsAllExpectedUnits() {
         let allCases = MeasureUnit.allCases
 
         XCTAssertTrue(allCases.contains(.kg), "Should contain kg")

@@ -321,8 +321,8 @@ struct JourneySettingsView: View {
                     try? await PhotoStore.deleteFromAppDirectory(localId: photo.assetLocalId)
 
                     // Delete the original photo file if it's different from cropped
-                    if photo.originalAssetLocalId != photo.assetLocalId {
-                        try? await PhotoStore.deleteFromAppDirectory(localId: photo.originalAssetLocalId)
+                    if let originalId = photo.originalAssetLocalId, originalId != photo.assetLocalId {
+                        try? await PhotoStore.deleteFromAppDirectory(localId: originalId)
                     }
                 }
                 print("✅ Deleted \(photos.count) photo files for journey '\(journey.name)'")

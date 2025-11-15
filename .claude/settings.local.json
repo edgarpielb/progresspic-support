@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/tmp/test_final.txt)",
+      "Bash(swift test:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

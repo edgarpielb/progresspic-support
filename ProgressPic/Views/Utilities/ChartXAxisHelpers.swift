@@ -37,15 +37,6 @@ enum ChartXAxisHelpers {
             }
             axisDates.reverse()
 
-        case .threeMonths:
-            // Show ~90 days, weekly
-            for i in stride(from: 0, to: 91, by: 7) {
-                if let date = calendar.date(byAdding: .day, value: -i, to: Date()) {
-                    axisDates.append(calendar.startOfDay(for: date))
-                }
-            }
-            axisDates.reverse()
-
         case .sixMonths:
             // Show ~180 days, bi-weekly
             for i in stride(from: 0, to: 181, by: 14) {
@@ -98,7 +89,7 @@ enum ChartXAxisHelpers {
             formatter.dateFormat = "E" // Mon, Tue, Wed...
             return formatter.string(from: date)
 
-        case .month, .threeMonths:
+        case .month:
             formatter.dateFormat = "d MMM" // 1 Jan, 15 Feb...
             return formatter.string(from: date)
 
@@ -122,11 +113,4 @@ protocol Dated {
 
 // Extend your existing models to conform
 extension MeasurementEntry: Dated {}
-extension BodyCompositionData: Dated {}
-
-// Placeholder for BodyCompositionData if it doesn't exist
-// Remove this if BodyCompositionData is already defined elsewhere
-struct BodyCompositionData: Dated {
-    let date: Date
-    let value: Double
-}
+extension HealthDataPoint: Dated {}

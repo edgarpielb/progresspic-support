@@ -33,168 +33,227 @@ struct PhotoEditSheet: View {
     
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppStyle.Colors.bgDark.ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header
-                    VStack(spacing: 4) {
-                        Text(currentPhoto.journey?.name ?? "Photo")
-                            .font(AppStyle.FontStyle.headline)
-                            .foregroundColor(AppStyle.Colors.textPrimary)
-                        
-                        Text(currentPhoto.date.formatted(date: .abbreviated, time: .shortened))
-                            .font(AppStyle.FontStyle.caption)
-                            .foregroundColor(AppStyle.Colors.textSecondary)
+            mainContent
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(AppStyle.Colors.bgDark, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar {
+                    toolbarContent
+                }
+                .safeAreaInset(edge: .bottom) {
+                    actionBar
+                }
+                .task {
+                    await preloadAllImages()
+                }
+                .onChange(of: currentPhoto) { _, newPhoto in
+                    switchToPhoto(newPhoto)
+                    notesText = newPhoto.notes ?? ""
+                    selectedDate = newPhoto.date
+                }
+                .onChange(of: showAdjustView) { _, isShowing in
+                    if !isShowing {
+                        handleAdjustViewDismissal()
                     }
-                    .padding(.top, AppStyle.Spacing.md)
-                    .padding(.bottom, AppStyle.Spacing.xl)
+                }
+                .sheet(isPresented: $showNotesEditor) {
+                    notesEditorSheet
+                }
+                .sheet(isPresented: $showDatePicker) {
+                    datePickerSheet
+                }
+                .sheet(isPresented: $showAdjustView) {
+                    PhotoAdjustSheet(photo: currentPhoto)
+                }
+                .alert("Delete Photo", isPresented: $showDeleteConfirmation) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Delete", role: .destructive) {
+                        deletePhoto()
+                    }
+                } message: {
+                    Text("Are you sure you want to delete this photo? This action cannot be undone.")
+                }
+        }
+    }
 
-                    // Main image with 4:5 aspect ratio (already cropped to 4:5)
-                    ZStack {
-                        if let img = image {
-                            // Image already has transform baked in, display at fixed aspect ratio
-                            Image(uiImage: img)
-                                .resizable()
-                                .aspectRatio(4.0/5.0, contentMode: .fit)
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, AppStyle.Spacing.md)
-                                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                        } else if isLoadingImages {
-                            ProgressView()
-                                .tint(AppStyle.Colors.textPrimary)
-                                .frame(maxWidth: .infinity)
-                                .aspectRatio(4/5, contentMode: .fit)
-                        } else {
-                            // Placeholder for when no image is available
-                            Rectangle()
-                                .fill(AppStyle.Colors.panel)
-                                .frame(maxWidth: .infinity)
-                                .aspectRatio(4/5, contentMode: .fit)
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .font(.largeTitle)
-                                        .foregroundColor(AppStyle.Colors.textTertiary)
-                                )
-                                .padding(.horizontal, AppStyle.Spacing.md)
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.2), value: currentPhoto.id)
-                    
-                    Spacer(minLength: AppStyle.Spacing.lg)
-                    
-                    // Navigation controls (if multiple photos)
-                    if allPhotos.count > 1 {
-                        HStack(spacing: AppStyle.Spacing.xxxl) {
-                            Button(action: previousPhoto) {
-                                Image(systemName: "arrow.left")
-                                    .font(.title2)
-                                    .foregroundColor(canGoPrevious ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
-                                    .frame(width: 60, height: 60)
-                                    .background(AppStyle.Colors.panel)
-                                    .clipShape(Circle())
-                            }
-                            .disabled(!canGoPrevious)
-                            .accessibilityLabel("Previous photo")
-                            .accessibilityHint(canGoPrevious ? "Navigate to the previous photo" : "No previous photo available")
+    // MARK: - Main Content View
+    @ViewBuilder
+    private var mainContent: some View {
+        ZStack {
+            AppStyle.Colors.bgDark.ignoresSafeArea()
 
-                            Button(action: nextPhoto) {
-                                Image(systemName: "arrow.right")
-                                    .font(.title2)
-                                    .foregroundColor(canGoNext ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
-                                    .frame(width: 60, height: 60)
-                                    .background(AppStyle.Colors.panel)
-                                    .clipShape(Circle())
-                            }
-                            .disabled(!canGoNext)
-                            .accessibilityLabel("Next photo")
-                            .accessibilityHint(canGoNext ? "Navigate to the next photo" : "No next photo available")
-                        }
-                        .padding(.bottom, AppStyle.Spacing.md)
-                        
-                        // Dots indicator
-                        HStack(spacing: 8) {
-                            ForEach(0..<min(allPhotos.count, 10), id: \.self) { index in
-                                Circle()
-                                    .fill(currentPhotoIndex == index ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
-                                    .frame(width: 8, height: 8)
-                            }
-                        }
-                        .padding(.bottom, AppStyle.Spacing.lg)
-                    }
+            VStack(spacing: 0) {
+                headerView
+                photoView
+                Spacer(minLength: AppStyle.Spacing.lg)
+                navigationControls
+            }
+        }
+    }
+
+    // MARK: - Header View
+    @ViewBuilder
+    private var headerView: some View {
+        VStack(spacing: 4) {
+            Text(currentPhoto.journey?.name ?? "Photo")
+                .font(AppStyle.FontStyle.headline)
+                .foregroundColor(AppStyle.Colors.textPrimary)
+
+            Text(currentPhoto.date.formatted(date: .abbreviated, time: .shortened))
+                .font(AppStyle.FontStyle.caption)
+                .foregroundColor(AppStyle.Colors.textSecondary)
+        }
+        .padding(.top, AppStyle.Spacing.md)
+        .padding(.bottom, AppStyle.Spacing.xl)
+    }
+
+    // MARK: - Photo View
+    @ViewBuilder
+    private var photoView: some View {
+        ZStack {
+            if let img = image {
+                loadedImageView(img)
+            } else if isLoadingImages {
+                loadingView
+            } else {
+                placeholderView
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: currentPhoto.id)
+    }
+
+    @ViewBuilder
+    private func loadedImageView(_ img: UIImage) -> some View {
+        let aspectRatio: CGFloat = 4.0/5.0
+        Image(uiImage: img)
+            .resizable()
+            .aspectRatio(aspectRatio, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, AppStyle.Spacing.md)
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+    }
+
+    @ViewBuilder
+    private var loadingView: some View {
+        ProgressView()
+            .tint(AppStyle.Colors.textPrimary)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4/5, contentMode: .fit)
+    }
+
+    @ViewBuilder
+    private var placeholderView: some View {
+        Rectangle()
+            .fill(AppStyle.Colors.panel)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4/5, contentMode: .fit)
+            .overlay(
+                Image(systemName: "photo")
+                    .font(.largeTitle)
+                    .foregroundColor(AppStyle.Colors.textTertiary)
+            )
+            .padding(.horizontal, AppStyle.Spacing.md)
+    }
+
+    // MARK: - Navigation Controls
+    @ViewBuilder
+    private var navigationControls: some View {
+        if allPhotos.count > 1 {
+            VStack(spacing: 0) {
+                navigationButtons
+                    .padding(.bottom, AppStyle.Spacing.md)
+
+                dotsIndicator
+                    .padding(.bottom, AppStyle.Spacing.lg)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var navigationButtons: some View {
+        HStack(spacing: AppStyle.Spacing.xxxl) {
+            previousButton
+            nextButton
+        }
+    }
+
+    @ViewBuilder
+    private var previousButton: some View {
+        Button(action: previousPhoto) {
+            Image(systemName: "arrow.left")
+                .font(.title2)
+                .foregroundColor(canGoPrevious ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                .frame(width: 60, height: 60)
+                .background(AppStyle.Colors.panel)
+                .clipShape(Circle())
+        }
+        .disabled(!canGoPrevious)
+        .accessibilityLabel("Previous photo")
+        .accessibilityHint(canGoPrevious ? "Navigate to the previous photo" : "No previous photo available")
+    }
+
+    @ViewBuilder
+    private var nextButton: some View {
+        Button(action: nextPhoto) {
+            Image(systemName: "arrow.right")
+                .font(.title2)
+                .foregroundColor(canGoNext ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                .frame(width: 60, height: 60)
+                .background(AppStyle.Colors.panel)
+                .clipShape(Circle())
+        }
+        .disabled(!canGoNext)
+        .accessibilityLabel("Next photo")
+        .accessibilityHint(canGoNext ? "Navigate to the next photo" : "No next photo available")
+    }
+
+    @ViewBuilder
+    private var dotsIndicator: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<min(allPhotos.count, 10), id: \.self) { index in
+                Circle()
+                    .fill(currentPhotoIndex == index ? AppStyle.Colors.textPrimary : AppStyle.Colors.textTertiary)
+                    .frame(width: 8, height: 8)
+            }
+        }
+    }
+
+    // MARK: - Toolbar Content
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.title3)
+                    .foregroundColor(AppStyle.Colors.textPrimary)
+            }
+            .accessibilityLabel("Back")
+            .accessibilityHint("Return to photo list")
+        }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            if let img = image {
+                ShareLink(item: Image(uiImage: img), preview: SharePreview("Photo", image: Image(uiImage: img))) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title3)
+                        .foregroundColor(AppStyle.Colors.textPrimary)
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(AppStyle.Colors.bgDark, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .foregroundColor(AppStyle.Colors.textPrimary)
-                    }
-                    .accessibilityLabel("Back")
-                    .accessibilityHint("Return to photo list")
-                }
-                
-                ToolbarItem(placement: .topBarTrailing) {
-                    if let img = image {
-                        ShareLink(item: Image(uiImage: img), preview: SharePreview("Photo", image: Image(uiImage: img))) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.title3)
-                                .foregroundColor(AppStyle.Colors.textPrimary)
-                        }
-                    }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                actionBar
-            }
-            .task {
-                // Pre-load all images when the sheet opens
-                await preloadAllImages()
-            }
-            .onChange(of: currentPhoto) { _, newPhoto in
-                // Switch to the cached image immediately
-                switchToPhoto(newPhoto)
-                notesText = newPhoto.notes ?? ""
-                selectedDate = newPhoto.date
-            }
-            .onChange(of: showAdjustView) { _, isShowing in
-                // Reload image when adjust sheet is dismissed to show updated transform
-                if !isShowing {
-                    // Invalidate cache only for the edited photo
-                    PhotoStore.invalidateCache(for: currentPhoto.assetLocalId)
-                    if currentPhoto.originalAssetLocalId != currentPhoto.assetLocalId {
-                        PhotoStore.invalidateCache(for: currentPhoto.originalAssetLocalId)
-                    }
-                    image = nil
-                    Task {
-                        // Wait a moment for SwiftData to propagate changes
-                        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                        await loadSingleImage(currentPhoto)
-                    }
-                }
-            }
-            .sheet(isPresented: $showNotesEditor) {
-                notesEditorSheet
-            }
-            .sheet(isPresented: $showDatePicker) {
-                datePickerSheet
-            }
-            .sheet(isPresented: $showAdjustView) {
-                PhotoAdjustSheet(photo: currentPhoto)
-            }
-            .alert("Delete Photo", isPresented: $showDeleteConfirmation) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
-                    deletePhoto()
-                }
-            } message: {
-                Text("Are you sure you want to delete this photo? This action cannot be undone.")
-            }
+        }
+    }
+
+    // MARK: - Helper Methods
+    private func handleAdjustViewDismissal() {
+        PhotoStore.invalidateCache(for: currentPhoto.assetLocalId)
+        if let originalId = currentPhoto.originalAssetLocalId,
+           originalId != currentPhoto.assetLocalId {
+            PhotoStore.invalidateCache(for: originalId)
+        }
+        image = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            await loadSingleImage(currentPhoto)
         }
     }
     
@@ -502,8 +561,8 @@ struct PhotoEditSheet: View {
             try? await PhotoStore.deleteFromAppDirectory(localId: photoToDelete.assetLocalId)
 
             // Delete the original file if it's different from cropped
-            if photoToDelete.originalAssetLocalId != photoToDelete.assetLocalId {
-                try? await PhotoStore.deleteFromAppDirectory(localId: photoToDelete.originalAssetLocalId)
+            if let originalId = photoToDelete.originalAssetLocalId, originalId != photoToDelete.assetLocalId {
+                try? await PhotoStore.deleteFromAppDirectory(localId: originalId)
             }
         }
 
