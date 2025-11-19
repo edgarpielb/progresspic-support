@@ -74,7 +74,7 @@ struct JourneyPhotoCollage: View {
                             photoTile(photos[5])
                             if photoCount > 6 {
                                 Rectangle()
-                                    .fill(Color.black.opacity(0.6))
+                                    .fill(AppStyle.Colors.bgDark.opacity(0.8))
                                 VStack {
                                     Spacer()
                                     Text("+\(photoCount - 6)")

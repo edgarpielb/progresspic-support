@@ -10,7 +10,6 @@ import SwiftUI
 struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var currentPage = 0
-    @State private var showTemplateSelection = false
     
     let pages: [OnboardingPage] = [
         OnboardingPage(
@@ -73,9 +72,9 @@ struct OnboardingView: View {
                 // Bottom button
                 VStack(spacing: 16) {
                     if currentPage == pages.count - 1 {
-                        // Get Started button on last page
+                        // Get Started button on last page - directly complete onboarding
                         Button(action: {
-                            showTemplateSelection = true
+                            completeOnboarding()
                         }) {
                             HStack {
                                 Text("Get Started")
@@ -119,11 +118,6 @@ struct OnboardingView: View {
                 }
                 .padding(.horizontal, 40)
                 .padding(.bottom, 40)
-            }
-        }
-        .sheet(isPresented: $showTemplateSelection) {
-            JourneyTemplateSelectionView {
-                completeOnboarding()
             }
         }
     }

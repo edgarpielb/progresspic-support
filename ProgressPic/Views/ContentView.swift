@@ -8,7 +8,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var cameraStopTask: Task<Void, Never>?
     @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "HasCompletedOnboarding")
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
             JourneysView()

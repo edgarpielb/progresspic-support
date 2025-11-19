@@ -92,6 +92,8 @@ struct CameraPreviewLayerView: UIViewRepresentable {
         // Add or update the preview layer
         if previewLayer.superlayer !== uiView.layer {
             AppConstants.Log.camera.debug("➕ Adding preview layer to view hierarchy")
+            // Use resizeAspectFill to fill the 4:5 frame completely
+            // The frame constraint in CameraHostView ensures we show exactly what will be captured
             previewLayer.videoGravity = .resizeAspectFill
             previewLayer.frame = uiView.bounds
             uiView.layer.insertSublayer(previewLayer, at: 0) // Insert at bottom

@@ -101,13 +101,13 @@ struct CameraHostView: View {
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
                 }
-                
+
                 // Grid overlay
                 if gridEnabled {
                     GridOverlay()
                         .frame(width: cropW, height: cropH)
                 }
-                
+
                 // Timer countdown overlay
                 if timerActive && countdownSeconds > 0 {
                     Text("\(countdownSeconds)")
@@ -115,17 +115,17 @@ struct CameraHostView: View {
                         .foregroundColor(.yellow)
                         .shadow(color: .black.opacity(0.5), radius: 15, x: 0, y: 2)
                 }
-                
+
                 // Overlaid ghost and timer controls on the left side
                 HStack {
                     VStack(alignment: .leading, spacing: 12) {
                         Spacer()
-                        
+
                         // Ghost controls (when active) - on the left
                         if showGhostControls && ghostEnabled {
                             ghostControlsView
                         }
-                        
+
                         // Timer controls (when active) - on the left
                         if showTimerControls {
                             timerControlsView
@@ -133,7 +133,7 @@ struct CameraHostView: View {
                     }
                     .padding(.leading, AppStyle.Spacing.lg)
                     .padding(.bottom, 200) // Position above bottom controls
-                    
+
                     Spacer()
                 }
                 .frame(width: cropW, height: cropH)
@@ -145,18 +145,18 @@ struct CameraHostView: View {
                 Image(systemName: "camera.fill")
                     .font(.system(size: 60))
                     .foregroundColor(.white.opacity(0.6))
-                
+
                 Text("Camera Access Required")
                     .font(.title2)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
-                
+
                 Text("Please allow camera access in Settings to take progress photos.")
                     .font(.body)
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
-                
+
                 Button("Open Settings") {
                     if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(settingsUrl)
@@ -607,11 +607,11 @@ struct CameraHostView: View {
     }
     
     func loadGhost() async {
-        guard selectedJourney != nil else { 
+        guard selectedJourney != nil else {
             lastGhost = nil
-            return 
+            return
         }
-        
+
         // Calculate appropriate target size for ghost image (screen resolution)
         let screenSize = UIScreen.main.bounds.size
         let scale = UIScreen.main.scale
@@ -620,7 +620,7 @@ struct CameraHostView: View {
             width: screenSize.width * scale,
             height: screenSize.height * scale
         )
-        
+
         AppConstants.Log.camera.debug("Loading ghost image at target size: \(Int(targetSize.width))x\(Int(targetSize.height))")
         
         // Check if task was cancelled before loading
