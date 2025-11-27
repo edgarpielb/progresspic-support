@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProgressPic Support</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-panel: rgba(255, 255, 255, 0.04);
+            --accent-cyan: #00d4ff;
+            --accent-gradient: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Animated background */
+        .bg-pattern {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(0, 153, 204, 0.05) 0%, transparent 50%),
+                var(--bg-dark);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Header */
+        header {
+            padding: 60px 0 40px;
+            text-align: center;
+        }
+
+        .app-icon {
+            width: 100px;
+            height: 100px;
+            border-radius: 22px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1a 100%);
+            box-shadow: 
+                0 20px 60px rgba(0, 0, 0, 0.4),
+                0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+
+        .app-name {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .app-tagline {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            font-weight: 400;
+        }
+
+        /* Contact Section - Prominent */
+        .contact-section {
+            background: var(--accent-gradient);
+            border-radius: 20px;
+            padding: 32px;
+            margin: 40px 0;
+            text-align: center;
+        }
+
+        .contact-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 12px;
+            color: #000;
+        }
+
+        .contact-section p {
+            color: rgba(0, 0, 0, 0.7);
+            margin-bottom: 20px;
+        }
+
+        .contact-email {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            color: #000;
+            padding: 14px 28px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+        }
+
+        .contact-email:hover {
+            background: rgba(0, 0, 0, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .contact-email svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Section styling */
+        section {
+            margin: 50px 0;
+        }
+
+        section h2 {
+            font-size: 1.75rem;
+            margin-bottom: 24px;
+            font-weight: 600;
+        }
+
+        /* FAQ Accordion */
+        .faq-item {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .faq-item:hover {
+            border-color: rgba(0, 212, 255, 0.3);
+        }
+
+        .faq-question {
+            width: 100%;
+            background: none;
+            border: none;
+            padding: 20px 24px;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-weight: 500;
+            font-family: inherit;
+        }
+
+        .faq-question::after {
+            content: '+';
+            font-size: 1.5rem;
+            color: var(--accent-cyan);
+            transition: transform 0.3s ease;
+        }
+
+        .faq-item.active .faq-question::after {
+            transform: rotate(45deg);
+        }
+
+        .faq-answer {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .faq-item.active .faq-answer {
+            max-height: 500px;
+        }
+
+        .faq-answer-content {
+            padding: 0 24px 20px;
+            color: var(--text-secondary);
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .feature-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(0, 212, 255, 0.3);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 12px;
+        }
+
+        .feature-card h3 {
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .feature-card p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 80px;
+            padding: 40px 0;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.95rem;
+            transition: color 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--accent-cyan);
+        }
+
+        .copyright {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Mobile adjustments */
+        @media (max-width: 600px) {
+            header {
+                padding: 40px 0 30px;
+            }
+
+            .app-name {
+                font-size: 2rem;
+            }
+
+            .contact-section {
+                padding: 24px;
+            }
+
+            .contact-email {
+                padding: 12px 20px;
+                font-size: 1rem;
+            }
+
+            section h2 {
+                font-size: 1.5rem;
+            }
+
+            .footer-links {
+                gap: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-pattern"></div>
+    
+    <div class="container">
+        <header>
+            <img src="app-icon.png" alt="ProgressPic Icon" class="app-icon">
+            <h1 class="app-name">ProgressPic</h1>
+            <p class="app-tagline">Track your transformation journey</p>
+        </header>
+
+        <div class="contact-section">
+            <h2>Need Help?</h2>
+            <p>We're here to help! Send us an email and we'll get back to you as soon as possible.</p>
+            <a href="mailto:edgarpielbusch@gmail.com" class="contact-email">
+                <svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                edgarpielbusch@gmail.com
+            </a>
+        </div>
+
+        <section>
+            <h2>Frequently Asked Questions</h2>
+            
+            <div class="faq-item">
+                <button class="faq-question">How do I take my first progress photo?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Open the app and create a new Journey by tapping the + button. Give your journey a name, then use the camera to capture your first progress photo. The app will save your photo and you can start tracking your transformation!
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">Will my photos sync across my devices?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Yes! ProgressPic uses iCloud to sync your data across all your Apple devices automatically. Make sure you're signed into the same iCloud account on all devices and have iCloud enabled in Settings. You can check your sync status in the app's Settings.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">How do I track my body measurements?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Within any Journey, you can add measurements like weight, body fat percentage, and body measurements (chest, waist, hips, arms, legs). Tap on a journey to view it, then add measurements. You can also connect HealthKit to import weight and body composition data automatically.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">Can I set reminders to take photos?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Absolutely! You can set custom reminders for each Journey. Choose the days and time you want to be reminded, and ProgressPic will send you a notification to take your progress photo.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">How do I compare my before and after photos?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Use the Compare feature within your Journey to see your transformation side by side. You can also use the Watch feature to see your photos play as a slideshow, or export a timelapse video of your progress.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">Can I export my progress as a video?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        Yes! ProgressPic can create timelapse videos of your progress photos. Go to your Journey, use the Watch or Compare features, and export your transformation as a video to share with friends or on social media.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">What data does ProgressPic collect?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        ProgressPic stores all your data locally on your device and in your private iCloud account. We don't collect, track, or have access to your photos or personal information. Your data stays yours. Read our <a href="privacy.html" style="color: var(--accent-cyan);">Privacy Policy</a> for more details.
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question">How do I delete my data?</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        You can delete individual photos, measurements, or entire Journeys directly within the app. To delete all data, simply delete the app from your device. Your iCloud data will sync the deletion across devices. For complete removal from iCloud, you can manage iCloud storage in your device Settings.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📸</div>
+                    <h3>Progress Photos</h3>
+                    <p>Capture and organize your transformation photos in customizable journeys</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Measurements</h3>
+                    <p>Track weight, body fat, and detailed body measurements over time</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">☁️</div>
+                    <h3>iCloud Sync</h3>
+                    <p>Your data syncs seamlessly across all your Apple devices</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">❤️</div>
+                    <h3>HealthKit</h3>
+                    <p>Import body composition data directly from Apple Health</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎬</div>
+                    <h3>Video Export</h3>
+                    <p>Create timelapse videos of your transformation journey</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔔</div>
+                    <h3>Reminders</h3>
+                    <p>Set custom reminders to stay consistent with your photos</p>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-links">
+                <a href="privacy.html">Privacy Policy</a>
+                <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" target="_blank" rel="noopener">Terms of Service</a>
+                <a href="mailto:edgarpielbusch@gmail.com">Contact Support</a>
+            </div>
+            <p class="copyright">© 2025 ProgressPic. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <script>
+        // FAQ Accordion
+        document.querySelectorAll('.faq-question').forEach(button => {
+            button.addEventListener('click', () => {
+                const item = button.parentElement;
+                const wasActive = item.classList.contains('active');
+                
+                // Close all items
+                document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('active'));
+                
+                // Open clicked item if it wasn't already open
+                if (!wasActive) {
+                    item.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+

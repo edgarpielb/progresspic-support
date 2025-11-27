@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - ProgressPic</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-panel: rgba(255, 255, 255, 0.04);
+            --accent-cyan: #00d4ff;
+            --accent-gradient: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        .bg-pattern {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(0, 153, 204, 0.05) 0%, transparent 50%),
+                var(--bg-dark);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Header */
+        header {
+            padding: 60px 0 40px;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-cyan);
+            text-decoration: none;
+            font-size: 0.95rem;
+            margin-bottom: 30px;
+            transition: opacity 0.3s ease;
+        }
+
+        .back-link:hover {
+            opacity: 0.8;
+        }
+
+        .back-link svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .last-updated {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* Content */
+        .content {
+            margin-top: 40px;
+        }
+
+        .section {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 20px;
+        }
+
+        .section h2 {
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+            font-weight: 600;
+            color: var(--accent-cyan);
+        }
+
+        .section p {
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .section p:last-child {
+            margin-bottom: 0;
+        }
+
+        .section ul {
+            color: var(--text-secondary);
+            margin-left: 20px;
+            margin-bottom: 12px;
+        }
+
+        .section ul:last-child {
+            margin-bottom: 0;
+        }
+
+        .section li {
+            margin-bottom: 8px;
+        }
+
+        .section strong {
+            color: var(--text-primary);
+        }
+
+        .highlight-box {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 16px 0;
+        }
+
+        .highlight-box p {
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        a {
+            color: var(--accent-cyan);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 60px;
+            padding: 40px 0;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.95rem;
+            transition: color 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--accent-cyan);
+        }
+
+        .copyright {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Mobile adjustments */
+        @media (max-width: 600px) {
+            header {
+                padding: 40px 0 30px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .section {
+                padding: 20px;
+            }
+
+            .section h2 {
+                font-size: 1.2rem;
+            }
+
+            .footer-links {
+                gap: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-pattern"></div>
+    
+    <div class="container">
+        <header>
+            <a href="index.html" class="back-link">
+                <svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                Back to Support
+            </a>
+            <h1>Privacy Policy</h1>
+            <p class="last-updated">Last updated: November 2025</p>
+        </header>
+
+        <div class="content">
+            <div class="section">
+                <h2>Overview</h2>
+                <p>ProgressPic is designed with your privacy as a top priority. We believe your personal photos and health data should stay personal.</p>
+                <div class="highlight-box">
+                    <p><strong>The short version:</strong> Your data is stored only on your device and in your private iCloud account. We never see, collect, or have access to your photos, measurements, or personal information.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>What Data is Collected</h2>
+                <p>ProgressPic stores the following data <strong>locally on your device</strong> and optionally in <strong>your private iCloud account</strong>:</p>
+                <ul>
+                    <li><strong>Progress Photos:</strong> Photos you take or import within the app</li>
+                    <li><strong>Body Measurements:</strong> Weight, body fat percentage, and body measurements you manually enter</li>
+                    <li><strong>Journey Data:</strong> Names, dates, and organization of your progress journeys</li>
+                    <li><strong>Reminder Settings:</strong> Times and days you've set for photo reminders</li>
+                    <li><strong>User Profile:</strong> Optional profile information (birth date, height, gender) used for health calculations</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>What We Do NOT Collect</h2>
+                <p>ProgressPic does <strong>not</strong> collect, transmit, or have access to:</p>
+                <ul>
+                    <li>Your photos or personal images</li>
+                    <li>Your health or measurement data</li>
+                    <li>Your location</li>
+                    <li>Analytics or usage tracking</li>
+                    <li>Advertising identifiers</li>
+                    <li>Any personally identifiable information</li>
+                </ul>
+                <p>We have no servers. We don't track you. We don't show ads.</p>
+            </div>
+
+            <div class="section">
+                <h2>Data Storage</h2>
+                <p><strong>Local Storage:</strong> All your data is stored locally on your device using Apple's secure storage frameworks.</p>
+                <p><strong>iCloud Sync:</strong> If you have iCloud enabled, your data syncs to your private iCloud account using Apple's CloudKit. This data is encrypted and only accessible by you through your Apple ID. We cannot access your iCloud data.</p>
+                <p><strong>Photo Library:</strong> When you save photos to your camera roll or import photos from your library, those photos are managed through Apple's Photos framework. ProgressPic only accesses photos you explicitly grant permission to use.</p>
+            </div>
+
+            <div class="section">
+                <h2>Third-Party Services</h2>
+                <p>ProgressPic uses the following Apple services:</p>
+                <ul>
+                    <li><strong>Apple iCloud (CloudKit):</strong> For secure data sync across your devices. Your data is stored in your private iCloud container.</li>
+                    <li><strong>Apple HealthKit:</strong> Optional integration to read body composition data (weight, body fat, BMI) from Apple Health. This data is only read with your explicit permission and is never sent anywhere.</li>
+                    <li><strong>Apple Notifications:</strong> For photo reminders you set. Notification scheduling happens entirely on your device.</li>
+                </ul>
+                <p>We do not use any third-party analytics, advertising, or tracking services.</p>
+            </div>
+
+            <div class="section">
+                <h2>Your Rights & Data Control</h2>
+                <p>You have complete control over your data:</p>
+                <ul>
+                    <li><strong>Access:</strong> All your data is visible and accessible within the app</li>
+                    <li><strong>Export:</strong> You can export your progress photos and videos at any time</li>
+                    <li><strong>Delete:</strong> You can delete individual photos, measurements, or entire journeys within the app. Deleting the app removes all local data.</li>
+                    <li><strong>iCloud Data:</strong> To remove data from iCloud, delete it from the app (it will sync the deletion) or manage your iCloud storage directly in iOS Settings</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Children's Privacy</h2>
+                <p>ProgressPic is not directed at children under 13. We do not knowingly collect information from children under 13 years of age.</p>
+            </div>
+
+            <div class="section">
+                <h2>Changes to This Policy</h2>
+                <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date.</p>
+            </div>
+
+            <div class="section">
+                <h2>Contact Us</h2>
+                <p>If you have any questions about this Privacy Policy or ProgressPic's data practices, please contact us:</p>
+                <p><a href="mailto:edgarpielbusch@gmail.com">edgarpielbusch@gmail.com</a></p>
+            </div>
+        </div>
+
+        <footer>
+            <div class="footer-links">
+                <a href="index.html">Support Home</a>
+                <a href="https://www.apple.com/legal/internet-services/itunes/dev/stdeula/" target="_blank" rel="noopener">Terms of Service</a>
+                <a href="mailto:edgarpielbusch@gmail.com">Contact Support</a>
+            </div>
+            <p class="copyright">© 2025 ProgressPic. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>
+
