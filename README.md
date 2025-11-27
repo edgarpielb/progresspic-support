@@ -31,5 +31,5 @@ The site is automatically deployed via GitHub Pages from the `main` branch.
 
 ## Contact
 
-For questions or issues, email: edgarpielbusch@gmail.com
+For questions or issues, email: progresspic.app@gmail.com
 
